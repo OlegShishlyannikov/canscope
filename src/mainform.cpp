@@ -281,7 +281,7 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                                     ftxui::vscroll_indicator | ftxui::frame | ftxui::flex;
                            })),
 
-                          ftxui::Renderer([]() { return ftxui::separatorEmpty(); }),
+                          ftxui::Renderer([]() { return ftxui::separator(); }),
 
                           ftxui::Container::Horizontal({
                               ftxui::Checkbox({

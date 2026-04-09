@@ -2,6 +2,8 @@
 
 CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames from an external process (e.g. `candump`), decodes them using a J1939 Digital Annex (xlsx), and presents results in an interactive terminal UI or as JSON output.
 
+[![asciicast](https://asciinema.org/a/uliPOLa1MtVvnjvL.svg)](https://asciinema.org/a/uliPOLa1MtVvnjvL)
+
 ## Features
 
 - **TUI mode** -- full-screen interactive terminal interface (FTXUI). Multiple display modes per CAN ID: deployed, brief, verbose, manual, little-endian
