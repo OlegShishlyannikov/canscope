@@ -27,7 +27,6 @@
 #include <boost/spirit/include/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
 
-#include "clipp.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
@@ -35,6 +34,7 @@
 #include "process.hpp"
 #include "recorder.hpp"
 #include "signals.hpp"
+#include <clipp.h>
 
 std::mutex g_j1939_db_mtx;
 
@@ -172,7 +172,6 @@ int32_t main(int32_t argc, char *argv[]) {
   auto aggregator_task = std::async(
       std::launch::async,
       [command = cli_opts.command](std::stop_token stop_token) {
-        fmt::println(stderr, "[task] aggregator started");
         if (command.empty()) {
 
           // Read from the saved pipe fd using epoll to avoid blocking on stop
@@ -250,7 +249,6 @@ int32_t main(int32_t argc, char *argv[]) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
           }
         }
-        fmt::println(stderr, "[task] aggregator finished");
       },
 
       aggregator_task_stop.get_token());
@@ -259,7 +257,6 @@ int32_t main(int32_t argc, char *argv[]) {
   auto refresh_task = std::async(
       std::launch::async,
       [](std::stop_token stop_token) {
-        fmt::println(stderr, "[task] refresh started");
         using aggregated_t = std::map<std::string, std::map<std::string, std::shared_ptr<can_frame_data_s>>>;
         aggregated_t old_data;
 
@@ -323,8 +320,6 @@ int32_t main(int32_t argc, char *argv[]) {
 
           old_data.swap(current);
         }
-
-        fmt::println(stderr, "[task] refresh finished");
       },
 
       refresh_task_stop.get_token());
@@ -332,7 +327,6 @@ int32_t main(int32_t argc, char *argv[]) {
   // Stop all tasks on SIGINT
   {
     static auto signal_handler = [](int sig) {
-      fmt::println(stderr, "[signal] SIGINT received, stopping tasks...");
       for (auto *source : {&aggregator_task_stop, &refresh_task_stop, &headless_task_stop}) {
         if (!source->stop_requested()) {
           source->request_stop();
@@ -393,7 +387,6 @@ int32_t main(int32_t argc, char *argv[]) {
                 }));
 
     signals.map.get<void()>("canplayer_stopped")->operator()();
-    fmt::println(stderr, "[exit] TUI exited, stopping tasks...");
     for (auto *source : {&aggregator_task_stop, &refresh_task_stop, &headless_task_stop}) {
       if (!source->stop_requested()) {
         source->request_stop();
@@ -423,12 +416,7 @@ int32_t main(int32_t argc, char *argv[]) {
     int idx = 0;
     for (auto *task : {&xlsx_parser_task, &aggregator_task, &refresh_task, &headless_task}) {
       if (task && task->valid()) {
-        fmt::println(stderr, "[exit] waiting for {}...", names[idx]);
-        if (task->wait_for(std::chrono::seconds(3)) == std::future_status::timeout) {
-          fmt::println(stderr, "[exit] {} timed out!", names[idx]);
-        } else {
-          fmt::println(stderr, "[exit] {} done", names[idx]);
-        }
+        task->wait_for(std::chrono::seconds(3));
       }
 
       idx++;

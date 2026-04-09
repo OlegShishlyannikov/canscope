@@ -108,6 +108,19 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(spdlog)
 
+FetchContent_Declare(
+  clipp
+  GIT_REPOSITORY https://github.com/muellan/clipp.git
+  GIT_TAG        v1.2.3
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS   TRUE
+)
+
+FetchContent_GetProperties(clipp)
+if(NOT clipp_POPULATED)
+  FetchContent_Populate(clipp)
+endif()
+
 project(canscope)
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 add_executable(${CMAKE_PROJECT_NAME} ${SOURCES})
@@ -120,6 +133,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
   ${fmt_SOURCE_DIR}/include
   ${json_SOURCE_DIR}/include
   ${sqlite_modern_SOURCE_DIR}/hdr
+  ${clipp_SOURCE_DIR}/include
 )
 
 target_link_directories(${CMAKE_PROJECT_NAME}
