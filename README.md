@@ -29,6 +29,23 @@ cmake -B build -S . && cmake --build build -j$(nproc)
 
 Binary: `build/canscope`
 
+### Docker
+
+```bash
+docker build -t canscope .
+```
+
+```bash
+# TUI mode -- requires terminal and CAN interface access
+docker run -it --network=host canscope -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
+
+# Headless mode
+docker run --network=host canscope -hl -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
+
+# Read from stdin
+candump can0 | docker run -i canscope -j1939 /app/thirdparty/j1939da_2018.xlsx -hl
+```
+
 ## Usage
 
 ```bash
@@ -41,12 +58,29 @@ Binary: `build/canscope`
 # Headless -- JSON to file
 ./build/canscope -hl -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx -of output.json
 
+# Read from stdin (pipe)
+candump can0 | ./build/canscope -j1939 thirdparty/j1939da_2018.xlsx
+
+# Headless with stdin
+candump can0 | ./build/canscope -hl -j1939 thirdparty/j1939da_2018.xlsx
+
+# Docker -- TUI with CAN interface access
+docker run -it --network=host canscope -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
+
+# Docker -- headless
+docker run --network=host canscope -hl -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
+
+# Docker -- read from stdin
+candump can0 | docker run -i canscope -hl -j1939 /app/thirdparty/j1939da_2018.xlsx
+
 # Record to SQLite database
 ./build/canscope -rec -db recording.db -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 
 # Record + TUI
 ./build/canscope -rec -db recording.db -tui -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 ```
+
+> **Note:** J1939 decoding has only been tested with the Digital Annex 2018 edition. Other editions may work but are not guaranteed.
 
 ### CLI flags
 
@@ -101,5 +135,5 @@ candump / other CAN source
 ## Roadmap
 
 - **Cross-platform support** -- Windows and macOS in addition to Linux
-- **Docker deployment** -- pre-built image for quick setup without manual compilation
+- ~~**Docker deployment** -- pre-built image for quick setup without manual compilation~~
 - **CANopen protocol support** -- CANopen decoding alongside J1939
