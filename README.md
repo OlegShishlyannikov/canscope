@@ -110,20 +110,6 @@ candump / other CAN source
     TUI   headless/recorder
 ```
 
-### Key components
-
-| File | Role |
-|------|------|
-| `main.cpp` | Entry point, CLI parsing (clipp), async task orchestration |
-| `xlsx.cpp` | Parses J1939 xlsx into in-memory SQLite (pgns, spns, spn_fragments) |
-| `can_frame.cpp` | Decodes CAN frame against SQLite DB, extracts SPN values |
-| `parsers.hpp` | Boost.Spirit Qi grammars for J1939 field formats |
-| `signals.hpp` | Type-safe signal map (boost::signals2) |
-| `recorder.cpp` | SQLite recording with gzip compression |
-| `mainform.cpp` | Root FTXUI component |
-| `canid_unit.cpp` | Per-CAN-ID display component |
-| `headless.cpp` | Headless JSON output handler |
-
 ### Patterns
 
 - Components communicate through a type-safe signal map (`signals_map_t`)
