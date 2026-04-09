@@ -1,0 +1,77 @@
+diff --git a/include/ftxui/component/component_options.hpp b/include/ftxui/component/component_options.hpp
+index d387fad..dd9173c 100644
+--- a/include/ftxui/component/component_options.hpp
++++ b/include/ftxui/component/component_options.hpp
+@@ -261,6 +261,7 @@ struct WindowOptions {
+   Ref<bool> resize_right = true;  ///< Can the right side be resized?
+   Ref<bool> resize_top = true;    ///< Can the top side be resized?
+   Ref<bool> resize_down = true;   ///< Can the down side be resized?
++  Ref<bool> draggable = false;    ///< Can do window dragging?
+
+   /// An optional function to customize how the window looks like:
+   std::function<Element(const WindowRenderState&)> render;
+diff --git a/include/ftxui/dom/elements.hpp b/include/ftxui/dom/elements.hpp
+index 63d5bf0..c8e5445 100644
+--- a/include/ftxui/dom/elements.hpp
++++ b/include/ftxui/dom/elements.hpp
+@@ -87,7 +87,7 @@ Decorator borderStyled(BorderStyle);
+ Decorator borderStyled(BorderStyle, Color);
+ Decorator borderStyled(Color);
+ Decorator borderWith(const Pixel&);
+-Element window(Element title, Element content, BorderStyle border = ROUNDED);
++Element window(Element title, Element content, BorderStyle border = ROUNDED, std::optional<Color> color = std::nullopt);
+ Element spinner(int charset_index, size_t image_index);
+ Element paragraph(const std::string& text);
+ Element paragraphAlignLeft(const std::string& text);
+diff --git a/src/ftxui/component/window.cpp b/src/ftxui/component/window.cpp
+index 7690781..7095e91 100644
+--- a/src/ftxui/component/window.cpp
++++ b/src/ftxui/component/window.cpp
+@@ -256,7 +256,7 @@ class WindowImpl : public ComponentBase, public WindowOptions {
+     drag_start_y = event.mouse().y - top() - box_.y_min;
+
+     // Drag only if we are not resizeing a border yet:
+-    drag_ = !resize_right_ && !resize_down_ && !resize_top_ && !resize_left_;
++    drag_ = (!resize_right_ && !resize_down_ && !resize_top_ && !resize_left_) && *draggable;
+     return true;
+   }
+
+diff --git a/src/ftxui/dom/border.cpp b/src/ftxui/dom/border.cpp
+index eb793b2..595b6e4 100644
+--- a/src/ftxui/dom/border.cpp
++++ b/src/ftxui/dom/border.cpp
+@@ -109,11 +109,6 @@ class Border : public Node {
+       p4.automerge = true;
+     }
+
+-    // Draw title.
+-    if (children_.size() == 2) {
+-      children_[1]->Render(screen);
+-    }
+-
+     // Draw the border color.
+     if (foreground_color_) {
+       for (int x = box_.x_min; x <= box_.x_max; ++x) {
+@@ -125,6 +120,11 @@ class Border : public Node {
+         screen.PixelAt(box_.x_max, y).foreground_color = *foreground_color_;
+       }
+     }
++
++    // Draw title.
++    if (children_.size() == 2) {
++      children_[1]->Render(screen);
++    }
+   }
+ };
+
+@@ -504,8 +504,8 @@ Element borderEmpty(Element child) {
+ /// │content│
+ /// └───────┘
+ /// ```
+-Element window(Element title, Element content, BorderStyle border) {
++  Element window(Element title, Element content, BorderStyle border, std::optional<Color> color) {
+   return std::make_shared<Border>(unpack(std::move(content), std::move(title)),
+-                                  border);
++                                  border, color);
+ }
+ }  // namespace ftxui

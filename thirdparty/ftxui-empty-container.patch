@@ -1,0 +1,27 @@
+--- a/src/ftxui/component/container.cpp
++++ b/src/ftxui/component/container.cpp
+@@ -105,7 +105,7 @@
+     }
+     if (elements.empty()) {
+-      return text("Empty container") | reflect(box_);
++      return text("") | reflect(box_);
+     }
+     return vbox(std::move(elements)) | reflect(box_);
+   }
+@@ -189,7 +189,7 @@
+     }
+     if (elements.empty()) {
+-      return text("Empty container");
++      return text("");
+     }
+     return hbox(std::move(elements));
+   }
+@@ -223,7 +223,7 @@
+     if (active_child) {
+       return active_child->Render();
+     }
+-    return text("Empty container");
++    return text("");
+   }
+
+   bool Focusable() const override {
