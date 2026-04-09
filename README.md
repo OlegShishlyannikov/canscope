@@ -97,3 +97,9 @@ candump / other CAN source
 - Factory functions via `extern` declarations instead of header includes
 - `std::jthread` / `std::stop_token` for async task management
 - SIGINT gracefully stops all background tasks
+
+## Roadmap
+
+- **Cross-platform support** -- Windows and macOS in addition to Linux
+- **Docker deployment** -- pre-built image for quick setup without manual compilation
+- **CANopen protocol support** -- CANopen decoding alongside J1939
