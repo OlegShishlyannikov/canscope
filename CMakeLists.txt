@@ -26,7 +26,7 @@ FetchContent_Declare(
   GIT_TAG        v6.0.0
   GIT_SHALLOW    TRUE
   GIT_PROGRESS   TRUE
-  PATCH_COMMAND  git apply --check ${CMAKE_SOURCE_DIR}/thirdparty/ftxui-empty-container.patch 2>/dev/null && git apply ${CMAKE_SOURCE_DIR}/thirdparty/ftxui-empty-container.patch || true COMMAND git apply --check ${CMAKE_SOURCE_DIR}/thirdparty/ftxui-window.patch 2>/dev/null && git apply ${CMAKE_SOURCE_DIR}/thirdparty/ftxui-window.patch || true
+  PATCH_COMMAND  git apply --check ${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-empty-container.patch 2>/dev/null && git apply ${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-empty-container.patch || true COMMAND git apply --check ${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-window.patch 2>/dev/null && git apply ${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-window.patch || true
 )
 
 FetchContent_MakeAvailable(ftxui)
