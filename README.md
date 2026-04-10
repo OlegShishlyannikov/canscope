@@ -2,7 +2,7 @@
 
 CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames from an external process (e.g. `candump`), decodes them using a J1939 Digital Annex (xlsx), and presents results in an interactive terminal UI or as JSON output.
 
-[![asciicast](https://asciinema.org/a/uliPOLa1MtVvnjvL.svg)](https://asciinema.org/a/uliPOLa1MtVvnjvL)
+![demo](canscope-demo.gif)
 
 ## Features
 
@@ -21,7 +21,16 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames from an extern
 - CMake >= 3.13
 - System libraries: boost (signals2, spirit, phoenix), sqlite3, systemd, zlib
 
-The rest of the dependencies are fetched automatically via CMake FetchContent (FTXUI, tiny-process-library, sqlite_modern_cpp, xlnt, fmt, nlohmann/json, spdlog).
+The rest of the dependencies are fetched automatically via CMake FetchContent:
+
+- [FTXUI](https://github.com/ArthurSonzogni/FTXUI) -- terminal UI framework
+- [tiny-process-library](https://gitlab.com/eidheim/tiny-process-library) -- subprocess management
+- [sqlite_modern_cpp](https://github.com/SqliteModernCpp/sqlite_modern_cpp) -- modern C++ SQLite wrapper
+- [xlnt](https://github.com/xlnt-community/xlnt) -- xlsx reading
+- [fmt](https://github.com/fmtlib/fmt) -- text formatting
+- [nlohmann/json](https://github.com/nlohmann/json) -- JSON library
+- [spdlog](https://github.com/gabime/spdlog) -- logging
+- [clipp](https://github.com/muellan/clipp) -- CLI argument parsing
 
 ```bash
 cmake -B build -S . && cmake --build build -j$(nproc)

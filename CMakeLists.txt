@@ -136,15 +136,5 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
   ${clipp_SOURCE_DIR}/include
 )
 
-target_link_directories(${CMAKE_PROJECT_NAME}
-  PRIVATE
-  ${ftxui_BINARY_DIR}
-  ${tpl_BINARY_DIR}
-  ${xlnt_BINARY_DIR}
-  ${fmt_BINARY_DIR}
-  ${json_BINARY_DIR}
-  #{sqlite_modern_BINARY_DIR}
-)
-
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ftxui-component ftxui-screen ftxui-dom tiny-process-library xlnt sqlite3 spdlog::spdlog systemd z ${Boost_LIBRARIES})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ftxui::component ftxui::screen ftxui::dom tiny-process-library xlnt sqlite3 spdlog::spdlog systemd z ${Boost_LIBRARIES})
 # target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC sqlite3 ${Boost_LIBRARIES})
