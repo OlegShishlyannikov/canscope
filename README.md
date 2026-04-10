@@ -1,18 +1,18 @@
 # {canscope}
 
-CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames from an external process (e.g. `candump`), decodes them using a J1939 Digital Annex (xlsx), and presents results in an interactive terminal UI or as JSON output.
+CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` format, decodes them using a J1939 Digital Annex (xlsx), and presents results in an interactive terminal UI or as JSON output.
 
 ![demo](canscope-demo.gif)
 
 ## Features
 
-- **TUI mode** -- full-screen interactive terminal interface (FTXUI). Multiple display modes per CAN ID: deployed, brief, verbose, manual, little-endian
-- **Headless mode** -- JSON output to stdout or file, for scripting and automation
-- **Recording** -- decoded J1939 SPN values saved to SQLite database with gzip compression and batch flushing
-- **J1939 decoding** -- PGN/SPN lookup, bit-level value extraction from payload
-- **CAN playback** -- replay recorded CAN frames
-- **Custom SPN configuration** -- per-parameter settings, parameter export
-- **Real-time** -- 30 fps UI refresh
+- **TUI mode** - full-screen interactive terminal interface (FTXUI). Multiple display modes per CAN ID: deployed, brief, verbose, manual, little-endian
+- **Headless mode** - JSON output to stdout or file, for scripting and automation
+- **Recording** - decoded J1939 SPN values saved to SQLite database with gzip compression and batch flushing
+- **J1939 decoding** - PGN/SPN lookup, bit-level value extraction from payload
+- **CAN playback** - replay recorded CAN frames
+- **Custom SPN configuration** - per-parameter settings, parameter export
+- **Real-time** - 30 fps UI refresh
 
 ## Build
 
@@ -23,14 +23,14 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames from an extern
 
 The rest of the dependencies are fetched automatically via CMake FetchContent:
 
-- [FTXUI](https://github.com/ArthurSonzogni/FTXUI) -- terminal UI framework
-- [tiny-process-library](https://gitlab.com/eidheim/tiny-process-library) -- subprocess management
-- [sqlite_modern_cpp](https://github.com/SqliteModernCpp/sqlite_modern_cpp) -- modern C++ SQLite wrapper
-- [xlnt](https://github.com/xlnt-community/xlnt) -- xlsx reading
-- [fmt](https://github.com/fmtlib/fmt) -- text formatting
-- [nlohmann/json](https://github.com/nlohmann/json) -- JSON library
-- [spdlog](https://github.com/gabime/spdlog) -- logging
-- [clipp](https://github.com/muellan/clipp) -- CLI argument parsing
+- [FTXUI](https://github.com/ArthurSonzogni/FTXUI) - terminal UI framework
+- [tiny-process-library](https://gitlab.com/eidheim/tiny-process-library) - subprocess management
+- [sqlite_modern_cpp](https://github.com/SqliteModernCpp/sqlite_modern_cpp) - modern C++ SQLite wrapper
+- [xlnt](https://github.com/xlnt-community/xlnt) - xlsx reading
+- [fmt](https://github.com/fmtlib/fmt) - text formatting
+- [nlohmann/json](https://github.com/nlohmann/json) - JSON library
+- [spdlog](https://github.com/gabime/spdlog) - logging
+- [clipp](https://github.com/muellan/clipp) - CLI argument parsing
 
 ```bash
 cmake -B build -S . && cmake --build build -j$(nproc)
@@ -104,31 +104,9 @@ candump can0 | docker run -i canscope -hl -j1939 /app/thirdparty/j1939da_2018.xl
 | `-tui` | | Show TUI alongside recording |
 | `-h` | `--help` | Show help |
 
-## Architecture
-
-```
-candump / other CAN source
-        |  stdout
-        v
-  aggregator_task ──> shared JSON (mutex-protected)
-        |
-   diff_task (33ms)
-        |
-   "new_entry" signal
-      /    \
-    TUI   headless/recorder
-```
-
-### Patterns
-
-- Components communicate through a type-safe signal map (`signals_map_t`)
-- `nlohmann::json` as universal data interchange between all layers
-- Factory functions via `extern` declarations instead of header includes
-- `std::jthread` / `std::stop_token` for async task management
-- SIGINT gracefully stops all background tasks
-
 ## Roadmap
 
-- **Cross-platform support** -- Windows and macOS in addition to Linux
-- ~~**Docker deployment** -- pre-built image for quick setup without manual compilation~~
-- **CANopen protocol support** -- CANopen decoding alongside J1939
+- **Cross-platform support** - Windows and macOS in addition to Linux
+- **Docker deployment** - pre-built image for quick setup without manual compilation
+- **CANopen protocol support** - CANopen decoding alongside J1939
+- **Other small features and enhancements** - UI improvements, performance optimizations, additional export formats
