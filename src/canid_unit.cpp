@@ -11,8 +11,6 @@
 #include "process.hpp"
 #include "tagsettings.hpp"
 #include "json/json.hpp"
-#include <spdlog/sinks/systemd_sink.h>
-#include <spdlog/spdlog.h>
 
 // For sqlite
 // #include "sqlite_modern_cpp.h"
@@ -239,16 +237,8 @@ CanIDUnit::CanIDUnit(const std::string &iface, const std::string &canid, const s
 }
 
 bool CanIDUnit::OnEvent(ftxui::Event event) {
-  static auto log = spdlog::systemd_logger_mt("canidunit", "cansniffer-hover");
-  log->set_level(spdlog::level::debug);
-
   if (event.is_mouse()) {
-    bool prev = m_hovered_;
     m_hovered_ = m_box_.Contain(event.mouse().x, event.mouse().y);
-    if (m_hovered_ != prev) {
-      log->debug("{}: hover={} mouse=({},{}) box=({},{},{},{})", m_canid_, m_hovered_, event.mouse().x, event.mouse().y,
-                 m_box_.x_min, m_box_.x_max, m_box_.y_min, m_box_.y_max);
-    }
   }
 
   return ftxui::ComponentBase::OnEvent(event);

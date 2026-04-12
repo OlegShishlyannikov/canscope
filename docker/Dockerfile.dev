@@ -1,0 +1,17 @@
+FROM manjarolinux/base:latest
+
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm \
+      clang \
+      lld \
+      cmake \
+      ninja \
+      git \
+      openssh \
+      sshpass \
+      boost \
+      sqlite3 \
+      zlib && \
+    pacman -Scc --noconfirm
+
+WORKDIR /app

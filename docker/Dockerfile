@@ -7,8 +7,6 @@ RUN pacman -Syu --noconfirm && \
       make \
       git \
       boost \
-      sqlite \
-      systemd-libs \
       zlib && \
     pacman -Scc --noconfirm
 

@@ -1,0 +1,15 @@
+FROM --platform=linux/arm64 manjarolinux/base:latest
+
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm \
+      boost \
+      zlib \
+      gcc && \
+    pacman -Scc --noconfirm
+
+RUN mkdir -p /sysroot && \
+    cp -a /usr /sysroot/usr && \
+    cp -a /lib /sysroot/lib && \
+    ([ -d /lib64 ] && cp -a /lib64 /sysroot/lib64 || true)
+
+VOLUME /sysroot

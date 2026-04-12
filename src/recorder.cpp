@@ -7,15 +7,9 @@
 #define FMT_HEADER_ONLY
 #include <fmt/format.h>
 
-#include <spdlog/sinks/systemd_sink.h>
-
 Recorder::Recorder(const std::string &db_path, bool console_output)
     : disk_db_path_(db_path), console_output_(console_output) {
-  log_ = spdlog::systemd_logger_mt("recorder", "cansniffer-rec");
-  log_->set_level(spdlog::level::info);
-
   flush_task_ = std::async(std::launch::async, [this](std::stop_token st) { background_flush_task(st); }, flush_stop_.get_token());
-  log_->info("recorder initialized, db_path={}", db_path);
   if (console_output_) fmt::println("Recording to: {}", db_path);
 }
 
@@ -40,7 +34,6 @@ void Recorder::flushAndClose() {
 
   std::lock_guard<std::mutex> lock(batch_mtx_);
   if (!pending_.empty()) {
-    log_->info("flushing remaining {} frames on exit", pending_.size());
     compress_batch();
   }
 }
@@ -130,15 +123,14 @@ void Recorder::compress_batch() {
     disk_db << "INSERT INTO batches (ts_start, ts_end, frame_count, data) VALUES (?, ?, ?, ?);"
             << ts_start << ts_end << static_cast<int64_t>(pending_.size()) << compressed;
 
-    auto msg = fmt::format("Flushed batch: {} frames, {:.1f}KB -> {:.1f}KB gzip ({:.0f}% compression)",
-                           pending_.size(),
-                           static_cast<double>(json_str.size()) / 1024.0,
-                           static_cast<double>(compressed.size()) / 1024.0,
-                           (1.0 - static_cast<double>(compressed.size()) / static_cast<double>(json_str.size())) * 100.0);
-    log_->info("{}", msg);
-    if (console_output_) fmt::println("{}", msg);
-  } catch (const sqlite::sqlite_exception &e) {
-    log_->error("disk DB write failed: {}", e.what());
+    if (console_output_) {
+      fmt::println("Flushed batch: {} frames, {:.1f}KB -> {:.1f}KB gzip ({:.0f}% compression)",
+                   pending_.size(),
+                   static_cast<double>(json_str.size()) / 1024.0,
+                   static_cast<double>(compressed.size()) / 1024.0,
+                   (1.0 - static_cast<double>(compressed.size()) / static_cast<double>(json_str.size())) * 100.0);
+    }
+  } catch (const sqlite::sqlite_exception &) {
   }
 
   pending_.clear();
@@ -157,7 +149,6 @@ void Recorder::background_flush_task(std::stop_token st) {
     bool mem_trigger = get_rss_mb() >= 500;
 
     if (time_trigger || mem_trigger) {
-      if (mem_trigger) log_->warn("RSS >= 500MB, forcing flush");
       compress_batch();
     }
   }

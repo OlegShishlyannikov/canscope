@@ -19,9 +19,10 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 **Requirements:**
 - clang++ with C++23 support
 - CMake >= 3.13
-- System libraries: boost (signals2, spirit, phoenix), sqlite3, systemd, zlib
+- Ninja
+- System libraries: boost (signals2, spirit, phoenix), sqlite3, zlib
 
-The rest of the dependencies are fetched automatically via CMake FetchContent:
+Dependencies fetched automatically via CMake FetchContent:
 
 - [FTXUI](https://github.com/ArthurSonzogni/FTXUI) - terminal UI framework
 - [tiny-process-library](https://gitlab.com/eidheim/tiny-process-library) - subprocess management
@@ -29,64 +30,76 @@ The rest of the dependencies are fetched automatically via CMake FetchContent:
 - [xlnt](https://github.com/xlnt-community/xlnt) - xlsx reading
 - [fmt](https://github.com/fmtlib/fmt) - text formatting
 - [nlohmann/json](https://github.com/nlohmann/json) - JSON library
-- [spdlog](https://github.com/gabime/spdlog) - logging
 - [clipp](https://github.com/muellan/clipp) - CLI argument parsing
 
-```bash
-cmake -B build -S . && cmake --build build -j$(nproc)
-```
-
-Binary: `build/canscope`
-
-### Docker
+### Available targets
 
 ```bash
-docker build -t canscope .
+make list              # Show all targets
+
+make build             # Native build (dynamic linking)
+make build_static      # Native build (static linking)
+make install           # Install to PREFIX (default /usr/local), requires patchelf
+make install_static    # Install static binary to PREFIX
+
+make docker-run ARGS='...'       # Build and run in Docker (cross-platform)
+make build_arm64                 # Cross-compile for arm64 (dynamic)
+make build_arm64_static          # Cross-compile for arm64 (static)
+
+make clean             # Remove all build artifacts
 ```
+
+### Native build
 
 ```bash
-# TUI mode -- requires terminal and CAN interface access
-docker run -it --network=host canscope -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
-
-# Headless mode
-docker run --network=host canscope -hl -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
-
-# Read from stdin
-candump can0 | docker run -i canscope -j1939 /app/thirdparty/j1939da_2018.xlsx -hl
+make build
+./build/native/canscope -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 ```
+
+### Docker (cross-platform)
+
+Works on Linux, macOS (?), and Windows (?). Requires only Docker and Make.
+
+```bash
+# TUI mode - local CAN interface
+make docker-run ARGS='-e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx'
+
+# TUI mode - remote CAN interface via SSH (no data if will ask password - use public key access or sshpass utility)
+make docker-run ARGS='-e "ssh user@remote candump can0" -j1939 thirdparty/j1939da_2018.xlsx'
+
+# Headless mode - create report about collected PGNs and SPNs
+make docker-run ARGS='-hl -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx -of output.json'
+```
+
+### Cross-compile for arm64
+
+```bash
+make build_arm64           # dynamic linking
+make build_arm64_static    # static linking
+```
+
+Requires Docker. SSH keys from `~/.ssh` and `/etc/hosts` are forwarded into the build container for fetching private git dependencies.
 
 ## Usage
 
 ```bash
 # TUI mode (default)
-./build/canscope -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
+canscope -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 
-# Headless -- JSON to stdout
-./build/canscope -hl -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
+# Headless - JSON to stdout
+canscope -hl -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 
-# Headless -- JSON to file
-./build/canscope -hl -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx -of output.json
+# Headless - JSON to file
+canscope -hl -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx -of output.json
 
 # Read from stdin (pipe)
-candump can0 | ./build/canscope -j1939 thirdparty/j1939da_2018.xlsx
-
-# Headless with stdin
-candump can0 | ./build/canscope -hl -j1939 thirdparty/j1939da_2018.xlsx
-
-# Docker -- TUI with CAN interface access
-docker run -it --network=host canscope -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
-
-# Docker -- headless
-docker run --network=host canscope -hl -e "candump can0" -j1939 /app/thirdparty/j1939da_2018.xlsx
-
-# Docker -- read from stdin
-candump can0 | docker run -i canscope -hl -j1939 /app/thirdparty/j1939da_2018.xlsx
+candump can0 | canscope -j1939 thirdparty/j1939da_2018.xlsx
 
 # Record to SQLite database
-./build/canscope -rec -db recording.db -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
+canscope -rec -db recording.db -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 
 # Record + TUI
-./build/canscope -rec -db recording.db -tui -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
+canscope -rec -db recording.db -tui -e "candump can0" -j1939 thirdparty/j1939da_2018.xlsx
 ```
 
 > **Note:** J1939 decoding has only been tested with the Digital Annex 2018 edition. Other editions may work but are not guaranteed.
@@ -106,7 +119,5 @@ candump can0 | docker run -i canscope -hl -j1939 /app/thirdparty/j1939da_2018.xl
 
 ## Roadmap
 
-- **Cross-platform support** - Windows and macOS in addition to Linux
-- **Docker deployment** - pre-built image for quick setup without manual compilation
 - **CANopen protocol support** - CANopen decoding alongside J1939
 - **Other small features and enhancements** - UI improvements, performance optimizations, additional export formats

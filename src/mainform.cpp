@@ -10,8 +10,6 @@
 #include <ftxui/screen/terminal.hpp>
 #include <map>
 #include <ranges>
-#include <spdlog/sinks/systemd_sink.h>
-#include <spdlog/spdlog.h>
 #include <unordered_map>
 #include <vector>
 
@@ -24,8 +22,6 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
   class Impl : public ftxui::ComponentBase {
   public:
     explicit Impl(ftxui::ScreenInteractive *screen, signals_map_t &smap) {
-      static auto logger = spdlog::systemd_logger_mt("mainform", "cansniffer");
-
       static bool canbus_params_export_dialog_shown = false, file_dialog_shown = false,
                   canbus_player_dialog_shown = false, canplayer_is_ready = false;
       ;

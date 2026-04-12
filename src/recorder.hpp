@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <spdlog/spdlog.h>
 
 struct FrameRecord {
   int64_t ts_ms;
@@ -43,5 +42,4 @@ private:
   std::stop_source flush_stop_;
   std::future<void> flush_task_;
   bool console_output_ = false;
-  std::shared_ptr<spdlog::logger> log_;
 };
