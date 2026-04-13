@@ -392,6 +392,7 @@ int32_t main(int32_t argc, char *argv[]) {
         source->request_stop();
       }
     }
+
     if (candump_fd >= 0) {
       ::close(candump_fd);
       candump_fd = -1;

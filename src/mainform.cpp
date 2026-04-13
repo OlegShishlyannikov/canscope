@@ -3,6 +3,7 @@
 #include "tagsettingrow.hpp"
 #include "tagsettings.hpp"
 #include <atomic>
+#include <boost/regex.hpp>
 #include <cstdint>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
@@ -24,10 +25,11 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
     explicit Impl(ftxui::ScreenInteractive *screen, signals_map_t &smap) {
       static bool canbus_params_export_dialog_shown = false, file_dialog_shown = false,
                   canbus_player_dialog_shown = false, canplayer_is_ready = false;
-      ;
+
       static float focus_relative = 0.15f;
       static float canbus_params_focus_relative = 0;
       static std::string canid_active;
+      static std::string filter_text;
       static size_t tags_count = 0u;
       static std::unordered_map<std::string, std::shared_ptr<CanIDUnit>> canid_lookup;
       static std::atomic<sqlite::database *> database_atomic{nullptr};
@@ -129,10 +131,24 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                             canidsCont, ftxui::Container::Vertical({}), canbus_params_export_dialog, false, false, true,
                             false, canid_active, file_dialog_shown, canbus_params_export_dialog_shown,
                             file_dialog_shown, spnSettingsFormMap, tagSettingsMap);
+
                         auto unit = std::static_pointer_cast<CanIDUnit>(new_cmp);
                         unit->update(entry.data, entry.diff, entry.verbose, entry.brief);
                         canid_lookup[entry.canid] = unit;
-                        canidsCont->Add(new_cmp);
+
+                        canidsCont->Add(ftxui::Maybe(new_cmp, [unit]() -> bool {
+                          if (filter_text.empty()) {
+                            return true;
+                          }
+
+                          try {
+                            boost::regex re(filter_text, boost::regex_constants::icase);
+                            std::string subject = unit->getCanID() + " " + unit->getLabel();
+                            return boost::regex_search(subject, re);
+                          } catch (...) {
+                            return true;
+                          }
+                        }));
                       }
                     }
                   });
@@ -170,14 +186,40 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                         fmt::format(" Uptime: {} ", fmt::format("{:02}:{:02}:{:02}", hours, minutes, seconds)))});
                   }),
 
-                  ftxui::Renderer([]() {
-                    return ftxui::hbox({
-                               ftxui::separator(),
-                               ftxui::filler(),
-                               ftxui::separator(),
-                           }) |
-                           ftxui::xflex;
-                  }),
+                  ftxui::Renderer([]() { return ftxui::separator(); }),
+                  ftxui::Container::Horizontal({
+                      ftxui::Input({
+                          .content = &filter_text,
+                          .placeholder = "regex filter ...",
+                          .transform = [](ftxui::InputState state) -> ftxui::Element {
+                            bool valid = true;
+
+                            if (!filter_text.empty()) {
+                              try {
+                                boost::regex(filter_text, boost::regex_constants::icase);
+                              } catch (...) {
+                                valid = false;
+                              }
+                            }
+
+                            state.element |= (!valid ? ftxui::color(ftxui::Color::Red) : ftxui::nothing) |
+                                             (state.focused ? ftxui::color(ftxui::Color::Cyan) : ftxui::nothing) |
+                                             (state.hovered ? ftxui::bold : ftxui::nothing);
+
+                            return ftxui::hbox({
+                                       ftxui::text(" Search: [ "),
+                                       state.element |
+                                           (state.hovered || state.focused ? ftxui::bgcolor(ftxui::Color::Grey11)
+                                                                           : ftxui::nothing) |
+                                           ftxui::flex,
+                                       ftxui::text(" ]"),
+                                   }) |
+                                   ftxui::flex;
+                          },
+                      }),
+                  }) | ftxui::flex,
+
+                  ftxui::Renderer([]() { return ftxui::separator(); }),
 
                   ftxui::Checkbox({
                       .transform = [this](const ftxui::EntryState &state) -> ftxui::Element {

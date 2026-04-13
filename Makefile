@@ -72,6 +72,7 @@ install_static: ## Install static binary to PREFIX/bin
 docker-run: ## Build and run in Docker (works on Linux/Mac/Windows)
 	docker build -t $(DEV_IMAGE) -f docker/Dockerfile.dev .
 	docker run --rm -it \
+		-e TERM=xterm-256color \
 		-v $(CURDIR):/app \
 		-v $(SSH_DIR):/host_ssh:ro \
 		-v /etc/hosts:/etc/hosts:ro \

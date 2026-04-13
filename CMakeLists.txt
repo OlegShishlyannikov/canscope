@@ -15,6 +15,7 @@ option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
 include(cmake/dependencies.cmake)
 
 project(canscope)
+find_package(Boost REQUIRED COMPONENTS regex)
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 
 add_executable(${CMAKE_PROJECT_NAME} ${SOURCES})
@@ -30,5 +31,5 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
   ${clipp_SOURCE_DIR}/include
 )
 
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ftxui::component ftxui::screen ftxui::dom tiny-process-library xlnt sqlite3_lib z ${Boost_LIBRARIES})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ftxui::component ftxui::screen ftxui::dom tiny-process-library xlnt sqlite3_lib z Boost::regex ${Boost_LIBRARIES})
 

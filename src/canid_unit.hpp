@@ -19,14 +19,25 @@
 
 class CanIDUnit : public ftxui::ComponentBase {
 public:
-  CanIDUnit(const std::string &iface, const std::string &canid, const std::string &protocol, size_t &spn_count, const std::vector<uint8_t> &data, ftxui::ScreenInteractive *screen,
-            signals_map_t &smap, ftxui::Component content, ftxui::Component container, ftxui::Component spn_settings_dialog, ftxui::Component cansettings_dialog, bool is_deployed,
-            bool is_verbose, bool is_brief, bool is_manual, std::string &, bool &, bool &canbus_parameters_export_shown, bool &filedialog_shown,
+  CanIDUnit(const std::string &iface, const std::string &canid, const std::string &protocol, size_t &spn_count,
+            const std::vector<uint8_t> &data, ftxui::ScreenInteractive *screen, signals_map_t &smap,
+            ftxui::Component content, ftxui::Component container, ftxui::Component spn_settings_dialog,
+            ftxui::Component cansettings_dialog, bool is_deployed, bool is_verbose, bool is_brief, bool is_manual,
+            std::string &, bool &, bool &canbus_parameters_export_shown, bool &filedialog_shown,
             std::map<std::string, std::map<int32_t, ftxui::Component>> &spnSettingsFormMap,
             spn_settings_map_t &spnSettingsMap);
 
   inline const std::string &getIfaceName() const { return m_iface_; }
   inline const std::string &getCanID() const { return m_canid_; }
+
+  inline std::string getLabel() const {
+    if (m_data_verbose_ && !m_data_verbose_->is_null() && m_data_verbose_->contains("Label")) {
+      return (*m_data_verbose_)["Label"].get<std::string>();
+    }
+
+    return {};
+  }
+
   inline size_t getDataSize() const { return m_data_.size(); }
   inline const std::vector<uint8_t> &getData() const { return m_data_; }
 
@@ -37,8 +48,8 @@ public:
   inline ftxui::Component getSpnSettingsForm() { return m_spnSettingsForm_; }
   inline const auto &getParametersExportMap() const { return s_canbus_parameters_export_map_; }
 
-  void update(const can_frame_data_s &data, const can_frame_diff_s &diff,
-              std::shared_ptr<nlohmann::json> verbose, std::shared_ptr<nlohmann::json> brief);
+  void update(const can_frame_data_s &data, const can_frame_diff_s &diff, std::shared_ptr<nlohmann::json> verbose,
+              std::shared_ptr<nlohmann::json> brief);
 
   bool OnEvent(ftxui::Event event) override;
 
@@ -64,6 +75,8 @@ private:
   static inline std::map<
       /* canid */ std::string,
       std::tuple</* deployed flag */ bool, /* has data flag */ bool,
-                 /* Selected spns to export  */ std::map</* spn name */ std::string, std::tuple</* deployed  */ bool, /* selected */ bool, /* data */ nlohmann::json>>>>
+                 /* Selected spns to export  */
+                 std::map</* spn name */ std::string,
+                          std::tuple</* deployed  */ bool, /* selected */ bool, /* data */ nlohmann::json>>>>
       s_canbus_parameters_export_map_ = {};
 };
