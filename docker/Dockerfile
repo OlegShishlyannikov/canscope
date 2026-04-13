@@ -5,8 +5,12 @@ RUN pacman -Syu --noconfirm && \
       clang \
       cmake \
       make \
+      autoconf \
+      automake \
+      libtool \
       git \
       boost \
+      icu \
       zlib && \
     pacman -Scc --noconfirm
 

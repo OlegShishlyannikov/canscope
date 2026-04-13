@@ -29,6 +29,8 @@
 #include <linux/can.h>
 #include <linux/can/raw.h>
 
+#include <boost/regex.hpp>
+
 #define FMT_HEADER_ONLY
 #include <fmt/format.h>
 
@@ -45,6 +47,7 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
     Impl(ftxui::ScreenInteractive *scr, signals_map_t &smap, bool &is_ready) {
       static sqlite::database *database = nullptr;
       static float canbus_player_focus_relative = 0;
+      static std::string player_filter_text;
 
       auto pgnContainer = ftxui::Container::Vertical({});
 
@@ -192,12 +195,14 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                 ->connect([](const std::vector<can_frame_update_s> &batch) {
                   for (const auto &entry : batch) {
                     uint32_t pgn_num = 0;
+
                     if (entry.canid.size() >= 6) {
                       auto pgn_str = entry.canid.substr(entry.canid.size() >= 8 ? entry.canid.size() - 6 : 2, 4);
                       std::stringstream ss;
                       ss << std::hex << pgn_str;
                       ss >> pgn_num;
                     }
+
                     received_pgns.insert(pgn_num);
                     if (pgs.contains(pgn_num) && pgs[pgn_num].forward && pgs[pgn_num].is_running) {
                       auto &pg = pgs[pgn_num];
@@ -405,6 +410,7 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                                                                   {"offset", spn_params.offset},
                                                               };
                                                             }(),
+
                                                             false, -100, ExpanderImpl::Root()) |
                                                             ftxui::Renderer([](ftxui::Element inner) {
                                                               return ftxui::hbox({
@@ -433,21 +439,52 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                                                                       fmt::format("{0:#b}", spn_params.raw))),
                                                               }),
 
-                                                              ftxui::hbox({
-                                                                  ftxui::text("PG payload: ") | ftxui::bold |
-                                                                      ftxui::color(ftxui::Color::Cyan),
-                                                                  ftxui::text(fmt::format(
-                                                                      "[{}]",
-                                                                      [&]() {
-                                                                        std::string ret;
-                                                                        for (const auto &byte :
-                                                                             spn_params.pg_ref->payload) {
-                                                                          ret += fmt::format("{0:#010b} ", byte);
-                                                                        }
+                                                              [&]() -> ftxui::Element {
+                                                                // Build bit mask for this SPN's fragments
+                                                                const auto &payload = spn_params.pg_ref->payload;
+                                                                std::vector<bool> highlight(payload.size() * 8, false);
+                                                                for (const auto &frag : spn_params.fragments) {
+                                                                  int32_t start_bit =
+                                                                      frag.byte_offset * 8 + frag.bit_offset;
 
-                                                                        return ret;
-                                                                      }())),
-                                                              }),
+                                                                  for (int32_t b = 0; b < frag.size; ++b) {
+                                                                    auto idx = static_cast<size_t>(start_bit + b);
+
+                                                                    if (idx < highlight.size()) {
+                                                                      highlight[idx] = true;
+                                                                    }
+                                                                  }
+                                                                }
+
+                                                                ftxui::Elements parts;
+                                                                parts.push_back(ftxui::text("PG payload: ") |
+                                                                                ftxui::bold |
+                                                                                ftxui::color(ftxui::Color::Cyan));
+                                                                parts.push_back(ftxui::text("["));
+
+                                                                for (size_t i = 0; i < payload.size(); ++i) {
+                                                                  parts.push_back(ftxui::text("0b"));
+
+                                                                  for (int32_t bit = 7; bit >= 0; --bit) {
+                                                                    bool is_set = (payload[i] >> bit) & 1;
+                                                                    bool is_spn = highlight[i * 8 + bit];
+                                                                    auto ch = ftxui::text(is_set ? "1" : "0");
+
+                                                                    if (is_spn) {
+                                                                      ch = ch | ftxui::color(ftxui::Color::Red) |
+                                                                           ftxui::bold;
+                                                                    }
+
+                                                                    parts.push_back(ch);
+                                                                  }
+
+                                                                  parts.push_back(ftxui::text(" "));
+                                                                }
+
+                                                                parts.push_back(ftxui::text("]"));
+
+                                                                return ftxui::hbox(std::move(parts));
+                                                              }(),
 
                                                               ftxui::separatorEmpty(),
                                                           });
@@ -461,7 +498,7 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                                 });
                               };
 
-                          pgnContainer->Add(ftxui::Container::Vertical({
+                          auto pgn_entry = ftxui::Container::Vertical({
                               ftxui::Container::Horizontal({
                                   ftxui::Checkbox({
                                       .checked = &pg_ref.selected,
@@ -621,6 +658,18 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                                       spnContainer,
                                   }) | ftxui::border,
                                   &pg_ref.selected),
+                          });
+
+                          pgnContainer->Add(ftxui::Maybe(pgn_entry, [&pg_ref = pgs[pgn]]() -> bool {
+                            if (player_filter_text.empty())
+                              return true;
+                            try {
+                              boost::regex re(player_filter_text, boost::regex_constants::icase);
+                              std::string subject = fmt::format("0x{:x} {}", pg_ref.pgn, pg_ref.label);
+                              return boost::regex_search(subject, re);
+                            } catch (...) {
+                              return true;
+                            }
                           }));
                         };
 
@@ -634,57 +683,106 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
       }
 
       auto main = ftxui::Container::Vertical({
+          ftxui::Input({
+              .content = &player_filter_text,
+              .placeholder = "regex filter ...",
+              .transform = [](ftxui::InputState state) -> ftxui::Element {
+                bool valid = true;
+                if (!player_filter_text.empty()) {
+                  try {
+                    boost::regex(player_filter_text, boost::regex_constants::icase);
+                  } catch (...) {
+                    valid = false;
+                  }
+                }
+
+                state.element |= (!valid ? ftxui::color(ftxui::Color::Red) : ftxui::nothing) |
+                                 (state.focused ? ftxui::color(ftxui::Color::Cyan) : ftxui::nothing) |
+                                 (state.hovered ? ftxui::bold : ftxui::nothing);
+
+                return ftxui::hbox({
+                    ftxui::text(" Search: [ "),
+                    state.element |
+                        (state.hovered || state.focused ? ftxui::bgcolor(ftxui::Color::Grey11) : ftxui::nothing) |
+                        ftxui::xflex,
+                    ftxui::text(" ]"),
+                });
+              },
+              .multiline = false,
+          }),
+
+          ftxui::Renderer([]() { return ftxui::separator(); }),
+
           (pgnContainer | ftxui::Renderer([](ftxui::Element inner) {
              return inner | ftxui::focusPositionRelative(0, canbus_player_focus_relative) | ftxui::vscroll_indicator |
                     ftxui::frame | ftxui::flex;
-           })) |
-              ftxui::CatchEvent([pgnContainer](ftxui::Event event) {
-                static const auto increment_focus = [pgnContainer = pgnContainer]() {
-                  if (auto n = pgnContainer->ChildCount(); n > 0)
-                    canbus_player_focus_relative =
-                        std::clamp(canbus_player_focus_relative + 1.0f / static_cast<float>(n), 0.0f, 1.0f);
-                };
-
-                static const auto decrement_focus = [pgnContainer = pgnContainer]() {
-                  if (auto n = pgnContainer->ChildCount(); n > 0)
-                    canbus_player_focus_relative =
-                        std::clamp(canbus_player_focus_relative - 1.0f / static_cast<float>(n), 0.0f, 1.0f);
-                };
-
-                if (!database) {
-                  return true;
-                }
-
-                if (event.is_mouse()) {
-                  switch (static_cast<enum ftxui::Mouse::Button>(event.mouse().button)) {
-                  case ftxui::Mouse::Button::WheelDown: {
-                    increment_focus();
-                    return true;
-                  } break;
-
-                  case ftxui::Mouse::Button::WheelUp: {
-                    decrement_focus();
-                    return true;
-                  } break;
-
-                  default:
-                    break;
-                  }
-                } else if (!event.is_character()) {
-                  if (event == ftxui::Event::ArrowDown) {
-                    increment_focus();
-                    return true;
-                  } else if (event == ftxui::Event::ArrowUp) {
-                    decrement_focus();
-                    return true;
-                  }
-                }
-
-                return false;
-              }),
+           })),
       });
 
-      Add({main});
+      Add({main | ftxui::CatchEvent([pgnContainer](ftxui::Event event) {
+             if (!database)
+               return true;
+
+             const auto scroll_step = []() -> float {
+               size_t visible_lines = 0;
+               boost::regex re;
+               bool has_filter = !player_filter_text.empty();
+
+               if (has_filter) {
+                 try {
+                   re = boost::regex(player_filter_text, boost::regex_constants::icase);
+                 } catch (...) {
+                   has_filter = false;
+                 }
+               }
+
+               for (const auto &[_, pg] : pgs) {
+                 if (has_filter) {
+                   std::string subject = fmt::format("0x{:x} {}", pg.pgn, pg.label);
+                   if (!boost::regex_search(subject, re)) {
+                     continue;
+                   }
+                 }
+
+                 ++visible_lines;
+
+                 if (pg.selected) {
+                   visible_lines += 15;
+                 }
+               }
+
+               return visible_lines > 0 ? 1.0f / static_cast<float>(visible_lines) : 0.03f;
+             };
+
+             if (event.is_mouse()) {
+               switch (static_cast<enum ftxui::Mouse::Button>(event.mouse().button)) {
+               case ftxui::Mouse::Button::WheelDown: {
+                 canbus_player_focus_relative = std::clamp(canbus_player_focus_relative + scroll_step(), 0.0f, 1.0f);
+                 return true;
+               }
+
+               case ftxui::Mouse::Button::WheelUp: {
+                 canbus_player_focus_relative = std::clamp(canbus_player_focus_relative - scroll_step(), 0.0f, 1.0f);
+                 return true;
+               }
+
+               default:
+                 break;
+               }
+             } else if (!event.is_character()) {
+               if (event == ftxui::Event::ArrowDown) {
+
+                 canbus_player_focus_relative = std::clamp(canbus_player_focus_relative + scroll_step(), 0.0f, 1.0f);
+                 return true;
+               } else if (event == ftxui::Event::ArrowUp) {
+
+                 canbus_player_focus_relative = std::clamp(canbus_player_focus_relative - scroll_step(), 0.0f, 1.0f);
+                 return true;
+               }
+             }
+
+             return false;
+           })});
     }
   };
 

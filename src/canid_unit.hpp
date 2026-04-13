@@ -48,6 +48,16 @@ public:
   inline ftxui::Component getSpnSettingsForm() { return m_spnSettingsForm_; }
   inline const auto &getParametersExportMap() const { return s_canbus_parameters_export_map_; }
 
+  static inline std::string *s_export_filter_text_ = nullptr;
+
+  static inline std::map<
+      /* canid */ std::string,
+      std::tuple</* deployed flag */ bool, /* has data flag */ bool,
+                 /* Selected spns to export  */
+                 std::map</* spn name */ std::string,
+                          std::tuple</* deployed  */ bool, /* selected */ bool, /* data */ nlohmann::json>>>>
+      s_canbus_parameters_export_map_ = {};
+
   void update(const can_frame_data_s &data, const can_frame_diff_s &diff, std::shared_ptr<nlohmann::json> verbose,
               std::shared_ptr<nlohmann::json> brief);
 
@@ -71,12 +81,4 @@ private:
   size_t m_last_brief_spn_count_ = 0;
   ftxui::Component m_export_selectors_;
   std::map<int32_t, std::pair<ftxui::Component, size_t>> m_export_custom_containers_;
-
-  static inline std::map<
-      /* canid */ std::string,
-      std::tuple</* deployed flag */ bool, /* has data flag */ bool,
-                 /* Selected spns to export  */
-                 std::map</* spn name */ std::string,
-                          std::tuple</* deployed  */ bool, /* selected */ bool, /* data */ nlohmann::json>>>>
-      s_canbus_parameters_export_map_ = {};
 };

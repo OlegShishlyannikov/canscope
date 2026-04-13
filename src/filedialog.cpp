@@ -77,6 +77,7 @@ ftxui::Component makeFileDialog(ftxui::ScreenInteractive *scr, signals_map_t &sm
           ftxui::Container::Vertical({
               ftxui::Renderer([&]() -> ftxui::Element { return ftxui::text("Export file"); }) |
                   ftxui::color(ftxui::Color::Red) | ftxui::hcenter,
+              ftxui::Renderer([]() { return ftxui::separator(); }),
 
               ftxui::Container::Horizontal({
                   ftxui::Renderer([]() -> ftxui::Element {
@@ -90,9 +91,9 @@ ftxui::Component makeFileDialog(ftxui::ScreenInteractive *scr, signals_map_t &sm
                   }),
               }),
 
-              ftxui::Renderer([]() { return ftxui::separatorEmpty(); }),
-
+              ftxui::Renderer([]() { return ftxui::separator(); }),
               entryList | ftxui::vscroll_indicator | ftxui::frame | ftxui::flex,
+              ftxui::Renderer([]() { return ftxui::separator(); }),
 
               ftxui::Container::Horizontal({
                   ftxui::Button({
@@ -104,7 +105,7 @@ ftxui::Component makeFileDialog(ftxui::ScreenInteractive *scr, signals_map_t &sm
                           },
 
                       .transform = [this](const ftxui::EntryState &state) -> ftxui::Element {
-                        return ftxui::text(" >[Export]< ") | (state.focused ? ftxui::bold : ftxui::nothing) |
+                        return ftxui::text(" >[export]< ") | (state.focused ? ftxui::bold : ftxui::nothing) |
                                ftxui::color(ftxui::Color::Cyan) |
                                (state.focused ? ftxui::bgcolor(ftxui::Color::Grey11) : ftxui::nothing);
                       },
@@ -113,7 +114,7 @@ ftxui::Component makeFileDialog(ftxui::ScreenInteractive *scr, signals_map_t &sm
                   ftxui::Button({
                       .on_click = [&]() { shown = false; },
                       .transform = [this](const ftxui::EntryState &state) -> ftxui::Element {
-                        return ftxui::text(" >[Cancel]< ") | (state.focused ? ftxui::bold : ftxui::nothing) |
+                        return ftxui::text(" >[cancel]< ") | (state.focused ? ftxui::bold : ftxui::nothing) |
                                ftxui::color(ftxui::Color::Cyan) |
                                (state.focused ? ftxui::bgcolor(ftxui::Color::Grey11) : ftxui::nothing);
                       },

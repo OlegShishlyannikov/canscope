@@ -8,6 +8,10 @@ RUN pacman -Syu --noconfirm && \
       ninja \
       git \
       openssh \
+      autoconf \
+      automake \
+      libtool \
+      make \
     && pacman -Scc --noconfirm
 
 WORKDIR /app

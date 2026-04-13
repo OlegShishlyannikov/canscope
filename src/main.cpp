@@ -46,14 +46,15 @@ int32_t main(int32_t argc, char *argv[]) {
   static std::atomic<sqlite::database *> j1939_db{nullptr};
   static std::stop_source aggregator_task_stop, refresh_task_stop, headless_task_stop;
   static TinyProcessLib::Process *p = nullptr;
-  std::future<void> xlsx_parser_task, headless_task;
+  std::future<void> j1939_parser_task, headless_task;
   extern std::unique_ptr<sqlite::database> parseXlsx(const std::string &file);
+  extern std::unique_ptr<sqlite::database> parseCsv(const std::string &file);
   static std::unique_ptr<sqlite::database> j1939_db_owner;
   static std::unique_ptr<Recorder> recorder;
   static std::unique_ptr<HeadlessHandler> headless_handler;
 
   static struct {
-    std::string docfile, command = "", output_file = "", record_db_path = "";
+    std::string xlsx_file, csv_file, command = "", output_file = "", record_db_path = "";
     bool show_help = false, headless_mode = false, sync_to_server = false, record_mode = false, tui_mode = false;
   } cli_opts;
 
@@ -90,16 +91,26 @@ int32_t main(int32_t argc, char *argv[]) {
         clipp::option("-e", "--execute-command") &
             clipp::value("command", cli_opts.command).call([&]() {}).doc("execute cli command to read its output"),
 
-        clipp::required("-j1939", "--j1939-document") &
-            clipp::value("J1939 Document file", cli_opts.docfile)
-                .call([&]() {
-                  xlsx_parser_task = std::async(std::launch::async, [&]() {
-                    j1939_db_owner = parseXlsx(cli_opts.docfile);
-                    j1939_db.store(j1939_db_owner.get());
-                    signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
-                  });
-                })
-                .doc("provide .xlsx document file for J1939 processing"));
+        (clipp::option("-j1939-xlsx") &
+             clipp::value("J1939 XLSX file", cli_opts.xlsx_file)
+                 .call([&]() {
+                   j1939_parser_task = std::async(std::launch::async, [&]() {
+                     j1939_db_owner = parseXlsx(cli_opts.xlsx_file);
+                     j1939_db.store(j1939_db_owner.get());
+                     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
+                   });
+                 })
+                 .doc("J1939 Digital Annex .xlsx file")) |
+        (clipp::option("-j1939-csv") &
+             clipp::value("J1939 CSV file", cli_opts.csv_file)
+                 .call([&]() {
+                   j1939_parser_task = std::async(std::launch::async, [&]() {
+                     j1939_db_owner = parseCsv(cli_opts.csv_file);
+                     j1939_db.store(j1939_db_owner.get());
+                     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
+                   });
+                 })
+                 .doc("J1939 Digital Annex .csv file")));
 
     auto man = clipp::make_man_page(cli, argv[0]);
     auto cli_with_help = (cli | clipp::option("-h", "--help").set(cli_opts.show_help).doc("show this help").call([&]() {
@@ -415,7 +426,7 @@ int32_t main(int32_t argc, char *argv[]) {
   {
     const char *names[] = {"xlsx_parser", "aggregator", "refresh", "headless"};
     int idx = 0;
-    for (auto *task : {&xlsx_parser_task, &aggregator_task, &refresh_task, &headless_task}) {
+    for (auto *task : {&j1939_parser_task, &aggregator_task, &refresh_task, &headless_task}) {
       if (task && task->valid()) {
         task->wait_for(std::chrono::seconds(3));
       }

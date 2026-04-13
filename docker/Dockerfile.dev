@@ -9,7 +9,12 @@ RUN pacman -Syu --noconfirm && \
       git \
       openssh \
       sshpass \
+      autoconf \
+      automake \
+      libtool \
+      make \
       boost \
+      icu \
       sqlite3 \
       zlib && \
     pacman -Scc --noconfirm

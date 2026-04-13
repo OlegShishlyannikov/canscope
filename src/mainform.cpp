@@ -30,6 +30,7 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
       static float canbus_params_focus_relative = 0;
       static std::string canid_active;
       static std::string filter_text;
+      static std::string export_filter_text;
       static size_t tags_count = 0u;
       static std::unordered_map<std::string, std::shared_ptr<CanIDUnit>> canid_lookup;
       static std::atomic<sqlite::database *> database_atomic{nullptr};
@@ -47,6 +48,7 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
       static std::map<std::string, std::map<int32_t, ftxui::Component>> spnSettingsFormMap;
       static auto spn_export_dialog = ftxui::Container::Vertical({});
       static auto canbus_params_export_dialog = ftxui::Container::Vertical({});
+      CanIDUnit::s_export_filter_text_ = &export_filter_text;
       static auto canbus_player_dialog = ftxui::Container::Vertical({});
 
       static const auto convertParametersMapToJson = []() {
@@ -314,6 +316,37 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                           }) | ftxui::hcenter,
                           ftxui::Renderer([]() { return ftxui::separator(); }),
 
+                          ftxui::Input({
+                              .content = &export_filter_text,
+                              .placeholder = "regex filter ...",
+                              .transform = [](ftxui::InputState state) -> ftxui::Element {
+                                bool valid = true;
+                                if (!export_filter_text.empty()) {
+                                  try {
+                                    boost::regex(export_filter_text, boost::regex_constants::icase);
+                                  } catch (...) {
+                                    valid = false;
+                                  }
+                                }
+
+                                state.element |= (!valid ? ftxui::color(ftxui::Color::Red) : ftxui::nothing) |
+                                                 (state.focused ? ftxui::color(ftxui::Color::Cyan) : ftxui::nothing) |
+                                                 (state.hovered ? ftxui::bold : ftxui::nothing);
+
+                                return ftxui::hbox({
+                                           ftxui::text(" Search: [ "),
+                                           state.element |
+                                               (state.hovered || state.focused ? ftxui::bgcolor(ftxui::Color::Grey11)
+                                                                               : ftxui::nothing) |
+                                               ftxui::xflex,
+                                           ftxui::text(" ]"),
+                                       });
+                              },
+                              .multiline = false,
+                          }),
+
+                          ftxui::Renderer([]() { return ftxui::separator(); }),
+
                           (canbus_params_export_dialog | ftxui::Renderer([](ftxui::Element inner) {
                              return inner | ftxui::focusPositionRelative(0, canbus_params_focus_relative) |
                                     ftxui::vscroll_indicator | ftxui::frame | ftxui::flex;
@@ -362,48 +395,48 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                       }) | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 96) |
                           ftxui::size(ftxui::HEIGHT, ftxui::EQUAL, 48) | ftxui::border |
                           ftxui::CatchEvent([](ftxui::Event event) {
-                            static constexpr float scroll_step = 0.03f;
-                            static const auto increment_focus = []() {
-                              canbus_params_focus_relative =
-                                  std::clamp(canbus_params_focus_relative + scroll_step, 0.0f, 1.0f);
-                            };
-                            static const auto decrement_focus = []() {
-                              canbus_params_focus_relative =
-                                  std::clamp(canbus_params_focus_relative - scroll_step, 0.0f, 1.0f);
+                            const auto scroll_step = []() -> float {
+                              size_t visible = 0;
+                              for (const auto &[_, entry] : CanIDUnit::s_canbus_parameters_export_map_) {
+                                if (export_filter_text.empty()) {
+                                  ++visible;
+                                } else {
+                                  // Filtering is handled by Maybe in canid_unit.cpp,
+                                  // just count all for scroll step estimation
+                                  ++visible;
+                                }
+                                if (std::get<0u>(entry))
+                                  visible += 5;
+                              }
+                              return visible > 0 ? 1.0f / static_cast<float>(visible) : 0.03f;
                             };
 
                             if (event.is_mouse()) {
                               switch (static_cast<enum ftxui::Mouse::Button>(event.mouse().button)) {
-                              case ftxui::Mouse::Button::WheelDown: {
-                                increment_focus();
-                                goto done;
-                              } break;
-
-                              case ftxui::Mouse::Button::WheelUp: {
-                                decrement_focus();
-                                goto done;
-                              } break;
-
+                              case ftxui::Mouse::Button::WheelDown:
+                                canbus_params_focus_relative =
+                                    std::clamp(canbus_params_focus_relative + scroll_step(), 0.0f, 1.0f);
+                                return true;
+                              case ftxui::Mouse::Button::WheelUp:
+                                canbus_params_focus_relative =
+                                    std::clamp(canbus_params_focus_relative - scroll_step(), 0.0f, 1.0f);
+                                return true;
                               default:
                                 break;
                               }
                             } else if (!event.is_character()) {
                               if (event == ftxui::Event::ArrowDown) {
-
-                                increment_focus();
-                                goto done;
+                                canbus_params_focus_relative =
+                                    std::clamp(canbus_params_focus_relative + scroll_step(), 0.0f, 1.0f);
+                                return true;
                               } else if (event == ftxui::Event::ArrowUp) {
-
-                                decrement_focus();
-                                goto done;
+                                canbus_params_focus_relative =
+                                    std::clamp(canbus_params_focus_relative - scroll_step(), 0.0f, 1.0f);
+                                return true;
                               }
                             }
 
-                          forward:
                             return false;
-
-                          done:
-                            return true;
                           }),
                       &canbus_params_export_dialog_shown) |
                   ftxui::Modal(makeFileDialog(screen, smap, file_dialog_shown), &file_dialog_shown) |

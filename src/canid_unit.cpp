@@ -1,5 +1,6 @@
 // #include <algorithm>
 // #include <cmath>
+#include <boost/regex.hpp>
 #include <cstdint>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_options.hpp>
@@ -330,16 +331,19 @@ void CanIDUnit::update(const can_frame_data_s &data, const can_frame_diff_s &dif
           total_bits += bc;
         }
       }
+
       if (settings.big_endian && total_bits > 8) {
         int64_t swapped = 0;
         size_t total_bytes = (total_bits + 7) / 8;
+
         for (size_t i = 0; i < total_bytes; ++i)
           swapped |= ((result >> (i * 8)) & 0xFF) << ((total_bytes - 1 - i) * 8);
         result = swapped;
       }
-      double spn_val = static_cast<double>(result) * resolution + offset_val;
 
+      double spn_val = static_cast<double>(result) * resolution + offset_val;
       nlohmann::json::array_t frags_json;
+
       for (size_t fi = 0; fi < settings.fragments.size(); ++fi) {
         const auto &f = settings.fragments[fi];
         int32_t bo = 0, bi = 0, bc = 0;
@@ -424,8 +428,10 @@ void CanIDUnit::update(const can_frame_data_s &data, const can_frame_diff_s &dif
             for (const auto &[spn_k, spn_v] : spns_arr_v.items()) {
               if (spn_k == "SPN name") {
                 std::string spn_name = spn_v.get<std::string>();
-                if (spn_name.find("(custom)") != std::string::npos)
+                if (spn_name.find("(custom)") != std::string::npos) {
                   continue;
+                }
+
                 auto &spn_map = std::get<2u>(s_canbus_parameters_export_map_[m_canid_]);
 
                 spn_map.insert_or_assign(spn_name, std::make_tuple(false, false, spns_arr_v));
@@ -529,7 +535,19 @@ void CanIDUnit::update(const can_frame_data_s &data, const can_frame_diff_s &dif
                                            !selectors_container->ChildCount();
                                   }));
 
-      m_cansettings_dialog_->Add(container);
+      m_cansettings_dialog_->Add(ftxui::Maybe(container, [this]() -> bool {
+        if (!s_export_filter_text_ || s_export_filter_text_->empty()) {
+          return true;
+        }
+
+        try {
+          boost::regex re(*s_export_filter_text_, boost::regex_constants::icase);
+          std::string subject = m_canid_ + " " + getLabel();
+          return boost::regex_search(subject, re);
+        } catch (...) {
+          return true;
+        }
+      }));
     }
 
     // Add custom SPNs to export dialog if not already present (tracked by tag_id)
@@ -579,6 +597,7 @@ void CanIDUnit::update(const can_frame_data_s &data, const can_frame_diff_s &dif
                                           .transform =
                                               [this, tag_id](const ftxui::EntryState state) {
                                                 std::string display_name = "custom";
+
                                                 if (m_spnSettingsMap_ && m_spnSettingsMap_->contains(m_canid_) &&
                                                     (*m_spnSettingsMap_)[m_canid_].contains(tag_id)) {
                                                   auto &s = (*m_spnSettingsMap_)[m_canid_][tag_id];
@@ -619,26 +638,33 @@ void CanIDUnit::update(const can_frame_data_s &data, const can_frame_diff_s &dif
     }
 
     // Rebuild FromLive for custom SPN export entries when fragment count changes
-    if (m_spnSettingsMap_ && m_spnSettingsMap_->contains(m_canid_) && !m_data_verbose_->is_null() && m_data_verbose_->contains("SPNs")) {
+    if (m_spnSettingsMap_ && m_spnSettingsMap_->contains(m_canid_) && !m_data_verbose_->is_null() &&
+        m_data_verbose_->contains("SPNs")) {
       for (auto &[tag_id, pair] : m_export_custom_containers_) {
         auto &[wrapper, prev_frag_count] = pair;
+
         size_t cur_frag_count = 0;
         if ((*m_spnSettingsMap_)[m_canid_].contains(tag_id)) {
           cur_frag_count = (*m_spnSettingsMap_)[m_canid_][tag_id].fragments.size();
         }
+
         if (cur_frag_count != prev_frag_count) {
           wrapper->DetachAllChildren();
           std::string search_name;
+
           if ((*m_spnSettingsMap_)[m_canid_].contains(tag_id)) {
             search_name = (*m_spnSettingsMap_)[m_canid_][tag_id].spn_name + " (custom)";
           }
+
           const auto &spns = (*m_data_verbose_)["SPNs"];
           for (size_t i = 0; i < spns.size(); ++i) {
             if (spns[i].contains("SPN name") && spns[i]["SPN name"].get<std::string>() == search_name) {
-              wrapper->Add(FromLive(m_data_verbose_, nlohmann::json::json_pointer("/SPNs/" + std::to_string(i)), false, -100, ExpanderImpl::Root()));
+              wrapper->Add(FromLive(m_data_verbose_, nlohmann::json::json_pointer("/SPNs/" + std::to_string(i)), false,
+                                    -100, ExpanderImpl::Root()));
               break;
             }
           }
+
           prev_frag_count = cur_frag_count;
         }
       }

@@ -3,6 +3,7 @@ FROM --platform=linux/arm64 manjarolinux/base:latest
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
       boost \
+      icu \
       zlib \
       gcc && \
     pacman -Scc --noconfirm
