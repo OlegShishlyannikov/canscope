@@ -45,5 +45,9 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
   ${clipp_SOURCE_DIR}/include
 )
 
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+  CANBOAT_JSON_PATH="${canboat_SOURCE_DIR}/docs/canboat.json"
+)
+
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ftxui::component ftxui::screen ftxui::dom tiny-process-library xlnt sqlite3_lib z Boost::regex ${Boost_LIBRARIES} lely::coapp lely::co lely::can lely::io2 lely::ev lely::util)
 

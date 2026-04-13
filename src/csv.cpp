@@ -92,6 +92,14 @@ std::unique_ptr<sqlite::database> parseCsv(const std::string &file) {
     if (line.empty())
       continue;
 
+    while (std::count(line.begin(), line.end(), '"') % 2 != 0) {
+      std::string next;
+      if (!std::getline(ifs, next))
+        break;
+      line += '\n';
+      line += next;
+    }
+
     auto fields = parseCsvLine(line);
     std::map<std::string, std::string> pgn_row_map, spn_row_map;
 

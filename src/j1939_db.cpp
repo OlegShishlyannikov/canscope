@@ -57,6 +57,10 @@ void initJ1939Database(sqlite::database &db) {
   db << "PRAGMA journal_mode = OFF";
   db << "PRAGMA synchronous = OFF";
   db << "PRAGMA foreign_keys = ON;";
+
+  db << "CREATE INDEX IF NOT EXISTS idx_spns_pgn ON spns(pgn);";
+  db << "CREATE INDEX IF NOT EXISTS idx_spn_fragments_spn ON spn_fragments(spn);";
+  db << "CREATE INDEX IF NOT EXISTS idx_spn_fragments_spn_pgn ON spn_fragments(spn, pgn);";
 }
 
 std::string buildPgnInsertSql() {

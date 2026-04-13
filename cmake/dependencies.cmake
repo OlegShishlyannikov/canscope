@@ -121,6 +121,19 @@ FetchContent_Declare(
   GIT_PROGRESS   TRUE
 )
 
+FetchContent_Declare(
+  canboat
+  GIT_REPOSITORY https://github.com/canboat/canboat.git
+  GIT_TAG        v6.1.6
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS   TRUE
+)
+
+FetchContent_GetProperties(canboat)
+if(NOT canboat_POPULATED)
+  FetchContent_Populate(canboat)
+endif()
+
 FetchContent_GetProperties(lely_core)
 if(NOT lely_core_POPULATED)
   FetchContent_Populate(lely_core)
