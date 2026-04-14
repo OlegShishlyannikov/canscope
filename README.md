@@ -7,13 +7,12 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 ## Features
 
 - **TUI mode** - full-screen interactive terminal interface (FTXUI). Four display modes per CAN ID: `brief`, `verbose`, `charts`, `manual`
-- **Per-SPN live charts** - scatter plot (braille canvas) per numeric SPN with auto-scaled Y axis, switchable between all SPNs of the PGN
-- **Regex search/filter** - filter the CAN ID list by regex over identifier and PGN label
-- **Headless mode** - NDJSON output to stdout, for scripting and automation
-- **Recording** - decoded J1939 SPN values saved to SQLite database with gzip compression and batch flushing
-- **CAN playback** - replay recorded CAN frames
-- **Custom SPN configuration** - per-parameter settings (up to 5 fragments), user-defined id/name/unit/resolution/offset/endianness. Custom SPNs also appear in the charts tab
-- **Candump parser hardening** - strict per-frame validation (CAN ID length & hex, DLC format, payload byte count, 64-byte upper bound, DLC vs actual byte count). Error frames counted in the status bar, RTR frames silently dropped
+- **Per-SPN live charts** - scatter plot (braille canvas) per numeric SPN with auto-scaled Y axis, switchable between all SPNs of the PGN.
+- **Regex search/filter** - filter the CANID list by regex over identifier and PGN label. Also works in "can player" and "parameters export" dialog.
+- **Headless mode** - newline-delimeted JSON output to stdout, for scripting and automation
+- **Recording** - Save decoded values to SQLite database with gzip compression
+- **CAN playback** - replay received CAN frames or play your own configuration
+- **Custom SPN configuration** - per-parameter settings, user-defined id/name/unit/resolution/offset/endianness. Custom SPNs also appear in the charts tab
 - **Real-time** - 30 fps UI refresh
 
 ### Screenshots
