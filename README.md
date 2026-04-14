@@ -70,8 +70,11 @@ make docker-run ARGS='-e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 # TUI mode - remote CAN interface via SSH (no data if will ask password - use public key access or sshpass utility)
 make docker-run ARGS='-e "ssh user@remote candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx'
 
-# Headless mode - create report about collected PGNs and SPNs
-make docker-run ARGS='-hl -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx -of output.json'
+# Discover mode - find out what PGNs/SPNs are on the bus
+make docker-run ARGS='-discover -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx'
+
+# Headless mode - stream decoded values
+make docker-run ARGS='-hl -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx'
 ```
 
 ### Cross-compile for arm64
@@ -85,27 +88,36 @@ Requires Docker. SSH keys from `~/.ssh` and `/etc/hosts` are forwarded into the 
 
 ## Usage
 
+All operating modes are mutually exclusive. If none is specified, TUI mode is used.
+
 ```bash
-# TUI mode (default)
+# TUI mode (default) — interactive terminal interface
 canscope -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
-# Headless - JSON to stdout
+# Discover mode — output PGN/SPN structure (no values) to stdout or file
+canscope -discover -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
+canscope -discover -of discovered.json -e "candump can0" -j1939-csv thirdparty/j1939da_2018.csv
+
+# Headless mode — stream all decoded values (NDJSON) to stdout
 canscope -hl -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
-# Headless - JSON to file
-canscope -hl -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx -of output.json
-
-# Read from stdin (pipe)
-candump can0 | canscope -j1939-xlsx thirdparty/j1939da_2018.xlsx
-
-# Record to SQLite database
+# Record mode — write all decoded values + timestamps to SQLite
 canscope -rec -db recording.db -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
-# Record + TUI
-canscope -rec -db recording.db -tui -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
+# Read from stdin (pipe)
+candump can0 | canscope -j1939-csv thirdparty/j1939da_2018.csv
 ```
 
 > **Note:** J1939 decoding has only been tested with the Digital Annex 2018 edition. Other editions may work but are not guaranteed.
+
+### Modes
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| TUI | *(default)* | Interactive full-screen terminal UI |
+| Discover | `-discover` | Output PGN/SPN structure (no values) to stdout or file (`-of`) |
+| Headless | `-hl` | Stream all decoded PGN/SPN values as NDJSON to stdout |
+| Record | `-rec` | Write all decoded PGN/SPN values + timestamps to SQLite (`-db`) |
 
 ### CLI flags
 
@@ -114,11 +126,11 @@ canscope -rec -db recording.db -tui -e "candump can0" -j1939-xlsx thirdparty/j19
 | `-j1939-xlsx` | | J1939 Digital Annex xlsx file |
 | `-j1939-csv` | | J1939 Digital Annex csv file (faster parsing) |
 | `-e` | `--execute-command` | Command to read CAN frames from (e.g. `"candump can0"`) |
-| `-hl` | `--headless` | Headless mode (no TUI) |
-| `-of` | `--output-file` | Output file path (headless mode) |
-| `-rec` | `--record` | Record decoded values to SQLite |
+| `-discover` | | Discover mode |
+| `-hl` | `--headless` | Headless mode |
+| `-rec` | `--record` | Record mode |
+| `-of` | `--output-file` | Output file path (used with `-discover`) |
 | `-db` | `--database` | SQLite database path (required with `-rec`) |
-| `-tui` | | Show TUI alongside recording |
 | `-h` | `--help` | Show help |
 
 ## Roadmap

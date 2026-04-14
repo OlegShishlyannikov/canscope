@@ -8,24 +8,23 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-HeadlessHandler::HeadlessHandler(const std::string &output_file)
-    : output_file_(output_file) {}
-
-void HeadlessHandler::onDatabaseReady(sqlite::database &db) {
-  database_ = &db;
-}
+HeadlessHandler::HeadlessHandler(const std::string &output_file) : output_file_(output_file) {}
+void HeadlessHandler::onDatabaseReady(sqlite::database &db) { database_ = &db; }
 
 void HeadlessHandler::onBatch(const std::vector<can_frame_update_s> &batch) {
-  if (!database_) return;
+  if (!database_)
+    return;
 
-  extern std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, const std::string &iface, const std::string &canid, const std::vector<uint8_t> &data);
+  extern std::pair<nlohmann::json, nlohmann::json> processFrame(
+      sqlite::database & db, const std::string &iface, const std::string &canid, const std::vector<uint8_t> &data);
 
   for (const auto &entry : batch) {
     const auto &iface = entry.iface;
     const auto &canid = entry.canid;
     const auto &frame_data = entry.data;
 
-    if (configuration_map_.contains(canid)) continue;
+    if (configuration_map_.contains(canid))
+      continue;
 
     auto [verbose, brief] = processFrame(*database_, iface, canid, frame_data.payload);
     configuration_map_.insert({

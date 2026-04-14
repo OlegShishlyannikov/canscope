@@ -188,6 +188,15 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                         fmt::format(" Uptime: {} ", fmt::format("{:02}:{:02}:{:02}", hours, minutes, seconds)))});
                   }),
 
+                  ftxui::Renderer([]() {
+                    const auto errors = g_error_frame_count.load(std::memory_order_relaxed);
+                    return ftxui::hbox({
+                        ftxui::text(" Errors: "),
+                        ftxui::text(fmt::format("{} ", errors)) |
+                            ftxui::color(errors ? ftxui::Color::Red : ftxui::Color::GrayDark),
+                    });
+                  }),
+
                   ftxui::Renderer([]() { return ftxui::separator(); }),
                   ftxui::Container::Horizontal({
                       ftxui::Input({

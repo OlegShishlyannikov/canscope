@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -10,9 +11,14 @@
 // Mutex protecting the J1939 SQLite database from concurrent access
 extern std::mutex g_j1939_db_mtx;
 
+// Count of CAN error frames seen on the bus (SocketCAN ERRORFRAME markers)
+extern std::atomic<uint64_t> g_error_frame_count;
+
 struct can_frame_data_s {
   std::vector<uint8_t> payload;
   int32_t size = 0;
+  bool is_error_frame = false;
+  bool is_remote_request = false;
 };
 
 struct can_frame_diff_s {

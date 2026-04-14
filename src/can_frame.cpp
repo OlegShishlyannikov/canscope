@@ -11,6 +11,7 @@
 std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, const std::string &iface,
                                                        const std::string &canid, const std::vector<uint8_t> &data) {
   nlohmann::json verbose, brief;
+
   db << R"(SELECT pgn, pg_label, pg_acronym, pg_descr, edp, dp, pf, ps, pg_datalen, pg_priority FROM pgns WHERE pgn = ?;)"
      << [&]() -> int32_t {
     int32_t ret;
@@ -29,11 +30,12 @@ std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, con
 
     // Get SPNs
     nlohmann::json::array_t spns_array;
-    db << R"(SELECT spn, spn_name, spn_pos, spn_length, resolution, offset, data_range, min_value, max_value, units, slot_id, slot_name, spn_type FROM spns WHERE pgn = ?;)"
+    db << R"(SELECT spn, spn_name, spn_pos, spn_length, resolution, offset, data_range, min_value, max_value, units, slot_id, slot_name, spn_type, value_encoding FROM spns WHERE pgn = ?;)"
        << pgn_int >>
         [&](int32_t spn, const std::string &spn_name, const std::string &spn_pos, int32_t spn_length, double resolution,
             int32_t offset, const std::string &data_range, double min, double max, const std::string &unit,
-            const std::string &slot_id, const std::string &slot_name, const std::string &spn_type) {
+            const std::string &slot_id, const std::string &slot_name, const std::string &spn_type,
+            const std::string &value_encoding) {
           nlohmann::json spn_json = {
               {"SPN (integer)", spn},
               {"SPN name", spn_name},
@@ -46,15 +48,33 @@ std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, con
               {"Unit", unit},
               {"SLOT id", slot_id},
               {"SPN type", spn_type},
+              {"Encoding", value_encoding},
           };
 
           // Get parts
           size_t result = 0u, iter = 0u, total_size_bits = 0u;
+          std::vector<uint8_t> ascii_bytes;
           nlohmann::json::array_t parts_array;
+
           db << "SELECT byte_offset,bit_offset,size FROM spn_fragments WHERE spn = ? AND pgn = ?" << spn << pgn >>
               [&, byte_array = data](int32_t byte_offset, int32_t bit_offset, int32_t size_bits) {
+                if (value_encoding == "ascii") {
+                  // ASCII SPNs are byte-aligned; collect raw bytes directly — size may exceed 64 bits.
+                  const size_t nbytes = size_bits / UINT8_WIDTH;
+
+                  for (size_t i = 0; i < nbytes && (byte_offset + i) < byte_array.size(); ++i) {
+                    ascii_bytes.push_back(byte_array[byte_offset + i]);
+                  }
+
+                  parts_array.push_back(nlohmann::json::parse(fmt::format(
+                      R"({{"{}":{{"byte_offset":{},"bit_offset":{},"size_bits":{},"parse_result":"ascii"}}}})",
+                      fmt::format("Fragment#{}", iter++), byte_offset, bit_offset, size_bits)));
+                  return;
+                }
+
                 result <<= size_bits;
                 total_size_bits += size_bits;
+
                 for (uint32_t i = 0; i < ((size_bits / UINT8_WIDTH) + (size_bits % UINT8_WIDTH ? 1 : 0)); ++i) {
                   const uint8_t &byte = byte_array[byte_offset + i];
                   result |= (((byte << (i * UINT8_WIDTH)) &
@@ -72,9 +92,20 @@ std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, con
                                 fmt::format("{:#x}", result))));
               };
 
-          double result_real = result * resolution + offset;
           spn_json["Fragments"] = parts_array;
-          spn_json["Value"] = result_real;
+          if (value_encoding == "ascii") {
+            std::string text;
+            text.reserve(ascii_bytes.size());
+
+            for (uint8_t b : ascii_bytes) {
+              text += (b >= 0x20 && b < 0x7f) ? static_cast<char>(b) : '.';
+            }
+
+            spn_json["Value"] = text;
+          } else {
+            spn_json["Value"] = result * resolution + offset;
+          }
+
           spns_array.push_back(spn_json);
         };
 
@@ -90,8 +121,17 @@ std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, con
 
     nlohmann::json::array_t spns_array;
     for (const auto &spn : verbose["SPNs"]) {
-      spns_array.push_back(fmt::format("{}: {:.6g} {}", spn["SPN name"].get<std::string>(), spn["Value"].get<double>(),
-                                       spn["Unit"].get<std::string>()));
+      const auto name = spn["SPN name"].get<std::string>();
+      const auto unit = spn["Unit"].get<std::string>();
+      const auto encoding = spn.value("Encoding", std::string{"numeric"});
+
+      if (encoding == "ascii") {
+        spns_array.push_back(fmt::format("{}: \"{}\"", name, spn["Value"].get<std::string>()));
+      } else if (encoding == "binary") {
+        spns_array.push_back(fmt::format("{}: {}", name, spn["Value"].get<double>() != 0.0 ? "yes" : "no"));
+      } else {
+        spns_array.push_back(fmt::format("{}: {:.6g} {}", name, spn["Value"].get<double>(), unit));
+      }
     }
 
     brief["SPNs"] = spns_array;
@@ -103,26 +143,25 @@ std::pair<nlohmann::json, nlohmann::json> processFrame(sqlite::database &db, con
 nlohmann::json verboseToExportJson(const nlohmann::json &verbose) {
   nlohmann::json::array_t spns;
 
-  if (verbose.is_null() || !verbose.contains("SPNs")) return spns;
+  if (verbose.is_null() || !verbose.contains("SPNs"))
+    return spns;
 
   std::string pgn = verbose.contains("PGN") ? verbose["PGN"].get<std::string>() : "";
 
   for (const auto &v : verbose["SPNs"]) {
     nlohmann::json spn = {
-        {"name", v.value("SPN name", "")},
-        {"offset", v.value("Offset", 0)},
-        {"resolution", v.value("Resolution", 0.0)},
-        {"max", v.value("Maximum value", 0.0)},
-        {"min", v.value("Minimum value", 0.0)},
-        {"pgn", pgn},
-        {"value", v.value("Value", 0.0)},
-        {"unit", v.value("Unit", "")},
+        {"name", v.value("SPN name", "")},          {"offset", v.value("Offset", 0)},
+        {"resolution", v.value("Resolution", 0.0)}, {"max", v.value("Maximum value", 0.0)},
+        {"min", v.value("Minimum value", 0.0)},     {"pgn", pgn},
+        {"value", v.value("Value", 0.0)},           {"unit", v.value("Unit", "")},
     };
 
     nlohmann::json::array_t frags;
+
     if (v.contains("Fragments")) {
       for (const auto &[k, frag] : v["Fragments"].items()) {
         auto frag_key = fmt::format("Fragment#{}", k);
+
         if (frag.contains(frag_key)) {
           frags.push_back({{
               fmt::format("fragment#{}", k),

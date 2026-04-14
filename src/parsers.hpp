@@ -1,11 +1,11 @@
 #pragma once
 
-#include <fmt/base.h>
 #include <algorithm>
 #include <boost/bind.hpp>
 #include <boost/spirit/home/qi/numeric/uint.hpp>
 #include <boost/spirit/include/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
+#include <fmt/base.h>
 #include <optional>
 #include <string>
 
@@ -43,8 +43,25 @@ struct spn_fragments_s {
 
 // Parse resolution string to this struct
 struct resolution_s {
-  double resolution;
+  enum class type_e { numeric, enum_states, binary, ascii };
+  double resolution = 1.0;
+  type_e type = type_e::numeric;
 };
+
+// Map resolution_s::type_e to a lowercase string tag used in SQLite / JSON
+inline const char *resolutionTypeName(resolution_s::type_e t) {
+  switch (t) {
+  case resolution_s::type_e::numeric:
+    return "numeric";
+  case resolution_s::type_e::enum_states:
+    return "enum";
+  case resolution_s::type_e::binary:
+    return "binary";
+  case resolution_s::type_e::ascii:
+    return "ascii";
+  }
+  return "numeric";
+}
 
 namespace _detail {
 template <typename It, typename Res> struct parser_s : qi::grammar<It, Res(), ascii::space_type> {
@@ -107,8 +124,9 @@ template <typename It> struct size_parser_s : _detail::parser_s<It, size_s> {
       }
     };
 
-    this->rule = ((qi::uint_ >> "byte") | (qi::uint_ >> "bytes"))[_val = boost::phoenix::function<bytes_to_bits_s>{}(qi::_1)] |
-                 ((qi::uint_ >> "bit") | (qi::uint_ >> "bits"))[_val = boost::phoenix::function<as_bits_s>{}(qi::_1)];
+    this->rule =
+        ((qi::uint_ >> "byte") | (qi::uint_ >> "bytes"))[_val = boost::phoenix::function<bytes_to_bits_s>{}(qi::_1)] |
+        ((qi::uint_ >> "bit") | (qi::uint_ >> "bits"))[_val = boost::phoenix::function<as_bits_s>{}(qi::_1)];
   }
 };
 }; // namespace size
@@ -215,7 +233,8 @@ template <typename It> struct position_parser_s : _detail::parser_s<It, spn_frag
 
     // start byte, last integer byte and last byte with bit offset
     struct rule_v5_handler_s {
-      spn_fragments_s operator()(size_t size_bits, uint32_t start_byte, uint32_t last_integer_byte, uint32_t last_byte, uint32_t bit_offset) const {
+      spn_fragments_s operator()(size_t size_bits, uint32_t start_byte, uint32_t last_integer_byte, uint32_t last_byte,
+                                 uint32_t bit_offset) const {
         return {
             .spn_fragments =
                 {
@@ -238,7 +257,8 @@ template <typename It> struct position_parser_s : _detail::parser_s<It, spn_frag
 
     // start byte with bit offset, first integer byte and last integer byte
     struct rule_v6_handler_s {
-      spn_fragments_s operator()(uint32_t start_byte, uint32_t bit_offset, uint32_t first_integer_byte, uint32_t last_byte) const {
+      spn_fragments_s operator()(uint32_t start_byte, uint32_t bit_offset, uint32_t first_integer_byte,
+                                 uint32_t last_byte) const {
         return {
             .spn_fragments =
                 {
@@ -261,20 +281,29 @@ template <typename It> struct position_parser_s : _detail::parser_s<It, spn_frag
     };
 
     position_rule_v0 = (qi::uint_)[qi::_val = boost::phoenix::function<rule_v0_handler_s>{}(qi::_1)];
-    position_rule_v1 = (qi::uint_ >> '.' >> qi::uint_)[qi::_val = boost::phoenix::function<rule_v1_handler_s>{}(size_bits, qi::_1, qi::_2)];
-    position_rule_v2 = (qi::uint_ >> '-' >> qi::uint_)[qi::_val = boost::phoenix::function<rule_v2_handler_s>{}(qi::_1, qi::_2)];
-    position_rule_v3 = (qi::uint_ >> ',' >> qi::uint_ >> '.' >> qi::uint_)[qi::_val = boost::phoenix::function<rule_v3_handler_s>{}(size_bits, qi::_1, qi::_2, qi::_3)];
-    position_rule_v4 = (qi::uint_ >> '.' >> qi::uint_ >> ',' >> qi::uint_)[qi::_val = boost::phoenix::function<rule_v4_handler_s>{}(qi::_1, qi::_2, qi::_3)];
+    position_rule_v1 = (qi::uint_ >> '.' >>
+                        qi::uint_)[qi::_val = boost::phoenix::function<rule_v1_handler_s>{}(size_bits, qi::_1, qi::_2)];
+    position_rule_v2 =
+        (qi::uint_ >> '-' >> qi::uint_)[qi::_val = boost::phoenix::function<rule_v2_handler_s>{}(qi::_1, qi::_2)];
+    position_rule_v3 =
+        (qi::uint_ >> ',' >> qi::uint_ >> '.' >>
+         qi::uint_)[qi::_val = boost::phoenix::function<rule_v3_handler_s>{}(size_bits, qi::_1, qi::_2, qi::_3)];
+    position_rule_v4 = (qi::uint_ >> '.' >> qi::uint_ >> ',' >>
+                        qi::uint_)[qi::_val = boost::phoenix::function<rule_v4_handler_s>{}(qi::_1, qi::_2, qi::_3)];
     position_rule_v5 = (qi::uint_ >> '-' >> qi::uint_ >> ',' >> qi::uint_ >> '.' >>
-                        qi::uint_)[qi::_val = boost::phoenix::function<rule_v5_handler_s>{}(size_bits, qi::_1, qi::_2, qi::_3, qi::_4)];
+                        qi::uint_)[qi::_val = boost::phoenix::function<rule_v5_handler_s>{}(size_bits, qi::_1, qi::_2,
+                                                                                            qi::_3, qi::_4)];
     position_rule_v6 =
-        (qi::uint_ >> '.' >> qi::uint_ >> ',' >> qi::uint_ >> '-' >> qi::uint_)[qi::_val = boost::phoenix::function<rule_v6_handler_s>{}(qi::_1, qi::_2, qi::_3, qi::_4)];
+        (qi::uint_ >> '.' >> qi::uint_ >> ',' >> qi::uint_ >> '-' >>
+         qi::uint_)[qi::_val = boost::phoenix::function<rule_v6_handler_s>{}(qi::_1, qi::_2, qi::_3, qi::_4)];
 
     // If one of rules works
-    this->rule = position_rule_v6 | position_rule_v5 | position_rule_v4 | position_rule_v3 | position_rule_v2 | position_rule_v1 | position_rule_v0;
+    this->rule = position_rule_v6 | position_rule_v5 | position_rule_v4 | position_rule_v3 | position_rule_v2 |
+                 position_rule_v1 | position_rule_v0;
   }
 
-  qi::rule<It, spn_fragments_s(), ascii::space_type> position_rule_v0, position_rule_v1, position_rule_v2, position_rule_v3, position_rule_v4, position_rule_v5, position_rule_v6;
+  qi::rule<It, spn_fragments_s(), ascii::space_type> position_rule_v0, position_rule_v1, position_rule_v2,
+      position_rule_v3, position_rule_v4, position_rule_v5, position_rule_v6;
 };
 }; // namespace position
 
@@ -294,30 +323,51 @@ template <typename It> struct resolution_parser_s : _detail::parser_s<It, resolu
   resolution_parser_s() : _detail::parser_s<It, resolution_s>() {
     struct resolution_rule_v0_handler_s {
       resolution_s operator()(float number) const {
-        return {
-            .resolution = number,
-        };
+        return {.resolution = number, .type = resolution_s::type_e::numeric};
       }
     };
 
     struct resolution_rule_v1_handler_s {
       resolution_s operator()(double first, double second) const {
-        return {
-            .resolution = first / second,
-        };
+        return {.resolution = first / second, .type = resolution_s::type_e::numeric};
       }
+    };
+
+    // `N states/M bit` — enum SPN: raw value is the state index, no scaling.
+    struct resolution_rule_v2_handler_s {
+      resolution_s operator()() const { return {.resolution = 1.0, .type = resolution_s::type_e::enum_states}; }
+    };
+
+    // `Binary` — single-bit boolean flag.
+    struct resolution_rule_binary_handler_s {
+      resolution_s operator()() const { return {.resolution = 1.0, .type = resolution_s::type_e::binary}; }
+    };
+
+    // `ASCII` — variable/fixed byte sequence to be rendered as text.
+    struct resolution_rule_ascii_handler_s {
+      resolution_s operator()() const { return {.resolution = 1.0, .type = resolution_s::type_e::ascii}; }
     };
 
     this->strnum = lexeme[-(qi::char_('+') | qi::char_('-')) >> +(qi::digit | qi::char_(',') | qi::char_('.'))];
     this->num = this->strnum[_val = boost::phoenix::function<_detail::string_to_double_s>{}(qi::_1)];
 
-    resolution_rule_v0 = (this->num >> *qi::char_)[qi::_val = boost::phoenix::function<resolution_rule_v0_handler_s>{}(qi::_1)];
-    resolution_rule_v1 = (qi::uint_ >> '/' >> qi::uint_ >> *qi::char_)[qi::_val = boost::phoenix::function<resolution_rule_v1_handler_s>{}(qi::_1, qi::_2)];
+    resolution_rule_v0 =
+        (this->num >> *qi::char_)[qi::_val = boost::phoenix::function<resolution_rule_v0_handler_s>{}(qi::_1)];
+    resolution_rule_v1 =
+        (qi::uint_ >> '/' >> qi::uint_ >>
+         *qi::char_)[qi::_val = boost::phoenix::function<resolution_rule_v1_handler_s>{}(qi::_1, qi::_2)];
+    resolution_rule_v2 =
+        (this->num >> "states" >> *qi::char_)[qi::_val = boost::phoenix::function<resolution_rule_v2_handler_s>{}()];
+    resolution_rule_binary =
+        qi::lit("Binary")[qi::_val = boost::phoenix::function<resolution_rule_binary_handler_s>{}()];
+    resolution_rule_ascii = qi::lit("ASCII")[qi::_val = boost::phoenix::function<resolution_rule_ascii_handler_s>{}()];
 
-    this->rule = resolution_rule_v1 | resolution_rule_v0;
+    this->rule =
+        resolution_rule_binary | resolution_rule_ascii | resolution_rule_v2 | resolution_rule_v1 | resolution_rule_v0;
   }
 
-  qi::rule<It, resolution_s(), ascii::space_type> resolution_rule_v0, resolution_rule_v1;
+  qi::rule<It, resolution_s(), ascii::space_type> resolution_rule_v0, resolution_rule_v1, resolution_rule_v2,
+      resolution_rule_binary, resolution_rule_ascii;
 };
 }; // namespace resolution
 
@@ -330,7 +380,9 @@ std::optional<struct resolution_s> parseSpnResolution(const std::string &str);
 
 BOOST_FUSION_ADAPT_STRUCT(parsers::range_s, (double, min)(double, max)(std::string, other));
 BOOST_FUSION_ADAPT_STRUCT(parsers::size_s, (size_t, size_bytes)(size_t, size_bits));
-BOOST_FUSION_ADAPT_STRUCT(parsers::spn_fragments_s::spn_part_s, (size_t, byte_offset)(size_t, bit_offset)(size_t, size));
-BOOST_FUSION_ADAPT_STRUCT(parsers::spn_fragments_s, (std::vector<struct parsers::spn_fragments_s::spn_part_s>, spn_fragments));
+BOOST_FUSION_ADAPT_STRUCT(parsers::spn_fragments_s::spn_part_s,
+                          (size_t, byte_offset)(size_t, bit_offset)(size_t, size));
+BOOST_FUSION_ADAPT_STRUCT(parsers::spn_fragments_s,
+                          (std::vector<struct parsers::spn_fragments_s::spn_part_s>, spn_fragments));
 BOOST_FUSION_ADAPT_STRUCT(parsers::offset_s, (double, offset));
 BOOST_FUSION_ADAPT_STRUCT(parsers::resolution_s, (double, resolution));

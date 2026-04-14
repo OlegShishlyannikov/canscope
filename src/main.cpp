@@ -1,5 +1,6 @@
 #include <atomic>
 #include <boost/signals2.hpp>
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
@@ -7,7 +8,7 @@
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <sstream>
+#include <ranges>
 #include <stop_token>
 #include <string>
 #include <sys/epoll.h>
@@ -31,12 +32,14 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "headless.hpp"
+#include "headless_streamer.hpp"
 #include "process.hpp"
 #include "recorder.hpp"
 #include "signals.hpp"
 #include <clipp.h>
 
 std::mutex g_j1939_db_mtx;
+std::atomic<uint64_t> g_error_frame_count{0};
 
 int32_t main(int32_t argc, char *argv[]) {
   static auto screen = ftxui::ScreenInteractive::Fullscreen();
@@ -52,10 +55,13 @@ int32_t main(int32_t argc, char *argv[]) {
   static std::unique_ptr<sqlite::database> j1939_db_owner;
   static std::unique_ptr<Recorder> recorder;
   static std::unique_ptr<HeadlessHandler> headless_handler;
+  static std::unique_ptr<HeadlessStreamer> headless_streamer;
+
+  enum class Mode { tui, discover, record, headless } mode = Mode::tui;
 
   static struct {
     std::string xlsx_file, csv_file, command = "", output_file = "", record_db_path = "";
-    bool show_help = false, headless_mode = false, sync_to_server = false, record_mode = false, tui_mode = false;
+    bool show_help = false;
   } cli_opts;
 
   // Parse cli options
@@ -66,42 +72,39 @@ int32_t main(int32_t argc, char *argv[]) {
 
     auto cli = (
 
-        clipp::option("-hl", "--headless")
-            .doc("Headless mode, write configuration to stdout if output file is not specified")
-            .set(cli_opts.headless_mode)
-            .call([]() { fmt::println("Headless mode"); }),
+        clipp::option("-dscvr, --discovery-mode")
+            .doc("Discover mode: output PGN/SPN structure (only first received falue) to stdout or file")
+            .call([&]() { mode = Mode::discover; }),
 
-        clipp::option("-of", "--output-file") &
-            clipp::value("Output file to write configuration", cli_opts.output_file)
-                .call([&]() { fmt::println("Output file is: {}", cli_opts.output_file); })
-                .doc("Specify output file to write configuration"),
+        clipp::option("-hl", "--headless")
+            .doc("Headless mode: stream all decoded PGN/SPN values to stdout")
+            .call([&]() { mode = Mode::headless; }),
 
         clipp::option("-rec", "--record")
-            .doc("Record mode: collect decoded J1939 SPN values to SQLite DB")
-            .set(cli_opts.record_mode)
-            .call([]() { fmt::println("Record mode"); }),
+            .doc("Record mode: write all decoded PGN/SPN values + timestamps to SQLite DB")
+            .call([&]() { mode = Mode::record; }),
 
-        clipp::option("-db", "--database") &
-            clipp::value("SQLite output database path", cli_opts.record_db_path)
-                .call([&]() { fmt::println("Record DB: {}", cli_opts.record_db_path); })
-                .doc("Path for the output SQLite database (used with -rec)"),
+        clipp::option("-of", "--output-file") &
+            clipp::value("Output file", cli_opts.output_file).doc("Output file path (used with -discover)"),
 
-        clipp::option("-tui").doc("Enable TUI mode (use with -rec to show UI while recording)").set(cli_opts.tui_mode),
+        clipp::option("-db", "--database") & clipp::value("SQLite output database path", cli_opts.record_db_path)
+                                                 .doc("SQLite database path (used with -rec)"),
 
         clipp::option("-e", "--execute-command") &
             clipp::value("command", cli_opts.command).call([&]() {}).doc("execute cli command to read its output"),
 
         (clipp::option("-j1939-xlsx") &
-             clipp::value("J1939 XLSX file", cli_opts.xlsx_file)
-                 .call([&]() {
-                   j1939_parser_task = std::async(std::launch::async, [&]() {
-                     j1939_db_owner = parseXlsx(cli_opts.xlsx_file);
-                     j1939_db.store(j1939_db_owner.get());
-                     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
-                   });
-                 })
-                 .doc("J1939 Digital Annex .xlsx file")) |
-        (clipp::option("-j1939-csv") &
+         clipp::value("J1939 XLSX file", cli_opts.xlsx_file)
+             .call([&]() {
+               j1939_parser_task = std::async(std::launch::async, [&]() {
+                 j1939_db_owner = parseXlsx(cli_opts.xlsx_file);
+                 j1939_db.store(j1939_db_owner.get());
+                 signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
+               });
+             })
+             .doc("J1939 Digital Annex .xlsx file")) |
+
+            (clipp::option("-j1939-csv") &
              clipp::value("J1939 CSV file", cli_opts.csv_file)
                  .call([&]() {
                    j1939_parser_task = std::async(std::launch::async, [&]() {
@@ -122,7 +125,7 @@ int32_t main(int32_t argc, char *argv[]) {
       return -1;
     }
 
-    if (cli_opts.record_mode && cli_opts.record_db_path.empty()) {
+    if (mode == Mode::record && cli_opts.record_db_path.empty()) {
       fmt::println(stderr, "Error: -rec requires -db <path>");
       return -1;
     }
@@ -130,44 +133,105 @@ int32_t main(int32_t argc, char *argv[]) {
 
   // Parse a single candump line and aggregate it
   static const auto parse_candump_line = [](const std::string &line) {
-    if (line.empty())
+    enum class field_e : size_t {
+      INTERFACE = 0,
+      CANID = 1,
+      DLC = 2,
+      PAYLOAD_BEGIN = 3,
+    };
+
+    constexpr auto idx = [](enum field_e f) consteval { return static_cast<size_t>(f); };
+    if (line.empty()) {
       return;
+    }
 
-    std::vector<std::string> words;
-    std::istringstream iss(line);
-    std::string s;
-
-    while (std::getline(iss, s, ' ')) {
-      if (!s.empty()) {
-        words.push_back(s);
+    std::vector<std::string_view> words;
+    for (auto part : std::string_view(line) | std::views::split(' ')) {
+      if (!part.empty()) {
+        words.emplace_back(part.begin(), part.end());
       }
     }
 
-    if (words.size() >= 4u) { // 0 - interface, 1 - canid, 2 - size, 3 - payload (1 byte minimum)
-      if (words[0].starts_with("can") || words[0].starts_with("vcan")) {
-        can_frame_data_s entry;
+    if (words.size() > idx(field_e::PAYLOAD_BEGIN)) {
+      auto &iface = words[idx(field_e::INTERFACE)];
+      can_frame_data_s entry;
+      auto &canid = words[idx(field_e::CANID)];
 
-        // Parse DLC
-        {
-          auto sv = std::string_view(words[2]).substr(1, words[2].size() - 2);
-          auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), entry.size);
-          if (ec != std::errc{}) {
-            entry.size = 0;
+      // Validate CAN ID: 3 hex digits (SFF, 11-bit) or 8 (EFF, 29-bit)
+      {
+        constexpr auto sff_length_bytes = 3u, eff_length_bytes = 8u;
+
+        // Check CAN_ID length
+        if (canid.size() != sff_length_bytes && canid.size() != eff_length_bytes) {
+          return;
+        }
+
+        // Check CAN_ID symbols
+        for (const char &c : canid) {
+          if (!std::isxdigit(static_cast<uint8_t>(c))) {
+            return;
           }
         }
+      }
 
-        // Parse payload bytes directly
-        entry.payload.reserve(words.size() - 3);
-        for (size_t i = 3; i < words.size(); ++i) {
-          uint8_t byte = 0;
-          std::from_chars(words[i].data(), words[i].data() + words[i].size(), byte, 16);
-          entry.payload.push_back(byte);
+      // Parse DLC
+      {
+        auto &dlc = words[idx(field_e::DLC)];
+        if (dlc.size() < 3 /* [${size}] format  */ || dlc.front() != '[' || dlc.back() != ']') {
+          return;
         }
 
-        {
-          std::lock_guard<std::mutex> lock(rw_mtx);
-          aggregated[words[0]][words[1]] = std::make_shared<can_frame_data_s>(std::move(entry));
+        auto sv = dlc.substr(1, dlc.size() - 2);
+        if (auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), entry.size);
+            ec != std::errc{} || ptr != sv.data() + sv.size()) {
+          return;
         }
+
+        // Max payload per CAN frame: 8 (Classic CAN) / 64 (CAN FD). Use 64 as upper bound.
+        constexpr int32_t max_payload_bytes = 64;
+        if (entry.size < 0 || entry.size > max_payload_bytes) {
+          return;
+        }
+      }
+
+      // Detect ERRORFRAME marker (SocketCAN diagnostic pseudo-frame): count and drop
+      if (words.back() == "ERRORFRAME") {
+        g_error_frame_count.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+
+      // Detect RTR: candump prints "remote request" in place of payload bytes. Drop silently.
+      if (words[idx(field_e::PAYLOAD_BEGIN)] == "remote") {
+        return;
+      }
+
+      // Parse payload bytes directly
+      entry.payload.reserve(words.size() - idx(field_e::PAYLOAD_BEGIN));
+
+      for (size_t i = idx(field_e::PAYLOAD_BEGIN); i < words.size(); ++i) {
+        if (words[i].size() != 2) { // each byte must be exactly 2 hex digits
+          return;
+        }
+
+        uint8_t byte = 0;
+        auto *first = words[i].data();
+        auto *last = first + words[i].size();
+        if (auto [ptr, ec] = std::from_chars(first, last, byte, 16 /* HEX format */);
+            ec != std::errc{} || ptr != last) {
+          return;
+        }
+
+        entry.payload.push_back(byte);
+      }
+
+      // DLC must match the actual number of payload bytes
+      if (entry.payload.size() != entry.size) {
+        return;
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(rw_mtx);
+        aggregated[std::string(iface)][std::string(canid)] = std::make_shared<can_frame_data_s>(std::move(entry));
       }
     }
   };
@@ -353,14 +417,13 @@ int32_t main(int32_t argc, char *argv[]) {
     ::signal(SIGINT, signal_handler);
   }
 
-  if (cli_opts.record_mode) {
-    bool rec_console = !cli_opts.tui_mode && !cli_opts.headless_mode;
-    recorder = std::make_unique<Recorder>(cli_opts.record_db_path, rec_console);
+  if (mode == Mode::record) {
+    recorder = std::make_unique<Recorder>(cli_opts.record_db_path, true);
     signals.map.get<void(const std::vector<can_frame_update_s> &)>("new_entries_batch")
         ->connect([](const std::vector<can_frame_update_s> &batch) { recorder->onBatch(batch); });
   }
 
-  if (cli_opts.headless_mode) {
+  if (mode == Mode::discover) {
     headless_handler = std::make_unique<HeadlessHandler>(cli_opts.output_file);
 
     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->connect([](sqlite::database &db) {
@@ -371,8 +434,13 @@ int32_t main(int32_t argc, char *argv[]) {
         ->connect([](const std::vector<can_frame_update_s> &batch) { headless_handler->onBatch(batch); });
   }
 
-  // Determine if TUI should run: default on, off if headless, off if rec-only (no -tui)
-  bool run_tui = !cli_opts.headless_mode && (!cli_opts.record_mode || cli_opts.tui_mode);
+  if (mode == Mode::headless) {
+    headless_streamer = std::make_unique<HeadlessStreamer>();
+    signals.map.get<void(const std::vector<can_frame_update_s> &)>("new_entries_batch")
+        ->connect([](const std::vector<can_frame_update_s> &batch) { headless_streamer->onBatch(batch); });
+  }
+
+  bool run_tui = (mode == Mode::tui);
 
   if (run_tui) {
     extern ftxui::Component makeMainForm(ftxui::ScreenInteractive * screen, signals_map_t & smap);
