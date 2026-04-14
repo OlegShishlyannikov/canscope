@@ -10,23 +10,32 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 - **Per-SPN live charts** - scatter plot (braille canvas) per numeric SPN with auto-scaled Y axis, switchable between all SPNs of the PGN.
 - **Regex search/filter** - filter the CANID list by regex over identifier and PGN label. Also works in "can player" and "parameters export" dialog.
 - **Headless mode** - newline-delimeted JSON output to stdout, for scripting and automation
+- **Discover mode** — probe a live bus for one pass, emit a JSON tree of every PGN seen with its full SPN breakdown (positions, resolutions, units, ranges). Useful for reverse-engineering or building configuration
+  files without running the TUI. Writes to stdout (newline-delimeted JSON) or `-of <file>` (array JSON).
 - **Recording** - Save decoded values to SQLite database with gzip compression
 - **CAN playback** - replay received CAN frames or play your own configuration
-- **Custom SPN configuration** - per-parameter settings, user-defined id/name/unit/resolution/offset/endianness. Custom SPNs also appear in the charts tab
+- **Manual mode / reverse-engineering** — build custom SPN definitions directly on top of a live CAN ID without a J1939 DA entry. Pick any byte/bit range in the payload, set resolution/offset/unit/endianness, and see
+  the decoded value update live next to the raw bytes (with the selected bits highlighted in red). Supports up to 5 non-contiguous fragments per SPN, little/big endian, and up to 8 custom SPNs per CAN ID. Custom SPNs
+  are first-class citizens: they appear in the `charts` tab, in newline-delimeted JSON in headless mode, and in the SPN export dialog
 - **Real-time** - 30 fps UI refresh
 
 ### Screenshots
 
 **SPN viewer** - `verbose` tab, full PGN/SPN breakdown with live values
 ![spn_viewer](pics/spn_viewer.png)
+
 **Live charts** - per-SPN scatter plot with auto-scaled Y axis
 ![charts](pics/charts.png)
+
 **Reverse engineering** - `manual` tab, build custom SPN from raw bits with live payload highlighting
 ![reverse-engineering](pics/reverse-engineering.png)
+
 **Regex search** - filter by CAN ID / PGN label
 ![regex_search](pics/regex_search.png)
+
 **Parameter export** - select SPNs across CAN IDs for JSON export
 ![spn_export_view](pics/spn_export_view.png)
+
 **Playback** - replay recorded SQLite sessions
 ![playback](pics/playback.png)
 
