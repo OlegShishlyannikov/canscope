@@ -36,7 +36,7 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 **Parameter export** - select SPNs across CAN IDs for JSON export
 ![spn_export_view](pics/spn_export_view.png)
 
-**Playback** - replay recorded SQLite sessions
+**Playback** - replay received CAN bus frames or replay your own configuration (based on J1939 DA or custom SPNs)
 ![playback](pics/playback.png)
 
 ## Build
