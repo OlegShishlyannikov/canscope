@@ -18,7 +18,6 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 
 ### Screenshots
 
-| | |
 |---|---|
 | **SPN viewer** - `verbose` tab, full PGN/SPN breakdown with live values | **Live charts** - per-SPN scatter plot with auto-scaled Y axis |
 | ![spn_viewer](pics/spn_viewer.png) | ![charts](pics/charts.png) |
