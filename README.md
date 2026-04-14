@@ -34,7 +34,7 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 ## Build
 
 **Requirements:**
-- clang++ with C++23 support
+- clang++ with C++20 support
 - CMake >= 3.13
 - Ninja
 - System libraries: boost (signals2, spirit, phoenix, regex), sqlite3, zlib, icu
