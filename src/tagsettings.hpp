@@ -13,6 +13,7 @@ struct spn_fragment_s {
 
 struct spn_settings_s {
   bool selected = false;
+  std::string spn_id;
   std::string spn_name;
   std::string resolution;
   std::string offset;

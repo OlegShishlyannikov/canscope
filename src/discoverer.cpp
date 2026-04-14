@@ -1,4 +1,4 @@
-#include "headless.hpp"
+#include "discoverer.hpp"
 
 #include <cstdint>
 #include <exception>
@@ -8,10 +8,10 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-HeadlessHandler::HeadlessHandler(const std::string &output_file) : output_file_(output_file) {}
-void HeadlessHandler::onDatabaseReady(sqlite::database &db) { database_ = &db; }
+DiscovererHandler::DiscovererHandler(const std::string &output_file) : output_file_(output_file) {}
+void DiscovererHandler::onDatabaseReady(sqlite::database &db) { database_ = &db; }
 
-void HeadlessHandler::onBatch(const std::vector<can_frame_update_s> &batch) {
+void DiscovererHandler::onBatch(const std::vector<can_frame_update_s> &batch) {
   if (!database_)
     return;
 

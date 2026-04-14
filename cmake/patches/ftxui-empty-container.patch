@@ -1,6 +1,6 @@
 --- a/src/ftxui/component/container.cpp
 +++ b/src/ftxui/component/container.cpp
-@@ -105,7 +105,7 @@
+@@ -105,6 +105,6 @@
      }
      if (elements.empty()) {
 -      return text("Empty container") | reflect(box_);
@@ -8,7 +8,7 @@
      }
      return vbox(std::move(elements)) | reflect(box_);
    }
-@@ -189,7 +189,7 @@
+@@ -189,6 +189,6 @@
      }
      if (elements.empty()) {
 -      return text("Empty container");

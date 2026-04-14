@@ -9,9 +9,9 @@
 
 #include <nlohmann/json.hpp>
 
-class HeadlessHandler {
+class DiscovererHandler {
 public:
-  explicit HeadlessHandler(const std::string &output_file);
+  explicit DiscovererHandler(const std::string &output_file);
 
   void onDatabaseReady(sqlite::database &db);
   void onBatch(const std::vector<can_frame_update_s> &batch);

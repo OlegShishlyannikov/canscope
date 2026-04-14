@@ -31,7 +31,7 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
-#include "headless.hpp"
+#include "discoverer.hpp"
 #include "headless_streamer.hpp"
 #include "process.hpp"
 #include "recorder.hpp"
@@ -54,7 +54,7 @@ int32_t main(int32_t argc, char *argv[]) {
   extern std::unique_ptr<sqlite::database> parseCsv(const std::string &file);
   static std::unique_ptr<sqlite::database> j1939_db_owner;
   static std::unique_ptr<Recorder> recorder;
-  static std::unique_ptr<HeadlessHandler> headless_handler;
+  static std::unique_ptr<DiscovererHandler> discoverer_handler;
   static std::unique_ptr<HeadlessStreamer> headless_streamer;
 
   enum class Mode { tui, discover, record, headless } mode = Mode::tui;
@@ -424,14 +424,14 @@ int32_t main(int32_t argc, char *argv[]) {
   }
 
   if (mode == Mode::discover) {
-    headless_handler = std::make_unique<HeadlessHandler>(cli_opts.output_file);
+    discoverer_handler = std::make_unique<DiscovererHandler>(cli_opts.output_file);
 
     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->connect([](sqlite::database &db) {
-      headless_handler->onDatabaseReady(db);
+      discoverer_handler->onDatabaseReady(db);
     });
 
     signals.map.get<void(const std::vector<can_frame_update_s> &)>("new_entries_batch")
-        ->connect([](const std::vector<can_frame_update_s> &batch) { headless_handler->onBatch(batch); });
+        ->connect([](const std::vector<can_frame_update_s> &batch) { discoverer_handler->onBatch(batch); });
   }
 
   if (mode == Mode::headless) {

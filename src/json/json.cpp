@@ -366,7 +366,7 @@ static ftxui::Component LiveLeaf(std::shared_ptr<nlohmann::json> root, nlohmann:
       c = ftxui::Color::White;
     }
 
-    auto element = ftxui::paragraph(text_str) | color(c);
+    auto element = ftxui::paragraph(text_str) | color(c) | ftxui::xflex_shrink;
     if (focused)
       element = element | ftxui::inverted | ftxui::focus;
     if (!is_last)
@@ -462,7 +462,7 @@ static ftxui::Component FromLiveKeyValue(std::shared_ptr<nlohmann::json> root, n
     return ftxui::hbox({
         ftxui::text(str) | color(ftxui::Color::BlueLight),
         ftxui::text(": "),
-        child->Render(),
+        child->Render() | ftxui::xflex_shrink,
     });
   });
 }

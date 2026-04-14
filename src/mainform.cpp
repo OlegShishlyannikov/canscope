@@ -38,7 +38,7 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
       extern ftxui::Component makeCanIDUnit(
           const std::string &, const std::string &, const std::string &, size_t &, const std::vector<uint8_t> &,
           ftxui::ScreenInteractive *, signals_map_t &, ftxui::Component, ftxui::Component, ftxui::Component,
-          ftxui::Component, bool, bool, bool, bool, std::string &, bool &, bool &, bool &,
+          ftxui::Component, bool, bool, bool, bool, bool, std::string &, bool &, bool &, bool &,
           std::map<std::string, std::map<int32_t, ftxui::Component>> &, spn_settings_map_t &);
       extern ftxui::Component makeFileDialog(ftxui::ScreenInteractive * scr, signals_map_t & smap, bool &shown);
       extern ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive * scr, signals_map_t & smap, bool &is_ready);
@@ -131,7 +131,7 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                         auto new_cmp = makeCanIDUnit(
                             entry.iface, entry.canid, "J1939", tags_count, entry.data.payload, screen, smap, component,
                             canidsCont, ftxui::Container::Vertical({}), canbus_params_export_dialog, false, false, true,
-                            false, canid_active, file_dialog_shown, canbus_params_export_dialog_shown,
+                            false, false, canid_active, file_dialog_shown, canbus_params_export_dialog_shown,
                             file_dialog_shown, spnSettingsFormMap, tagSettingsMap);
 
                         auto unit = std::static_pointer_cast<CanIDUnit>(new_cmp);

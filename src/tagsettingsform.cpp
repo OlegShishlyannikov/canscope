@@ -25,17 +25,17 @@
 #include "tagsettings.hpp"
 
 ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_map_t &smap, const std::string &canid,
-                                     std::string &canid_active, ftxui::Component cmpCont, ftxui::Component dialog,
-                                     bool &modal_shown,
+                                     std::string &canid_active, std::function<std::vector<uint8_t>()> data_getter,
+                                     ftxui::Component dialog, bool &modal_shown,
                                      std::map<std::string, std::map<int32_t, ftxui::Component>> &spnSettingsFormMap,
                                      spn_settings_map_t &spnSettingsMap) {
   class Impl : public ftxui::ComponentBase {
   public:
     explicit Impl(ftxui::ScreenInteractive *screen, signals_map_t &smap, const std::string &canid,
-                  std::string &canid_active, ftxui::Component cmpCont, ftxui::Component dialog, bool &modal_shown,
-                  std::map<std::string, std::map<int32_t, ftxui::Component>> &spnSettingsFormMap,
+                  std::string &canid_active, std::function<std::vector<uint8_t>()> data_getter, ftxui::Component dialog,
+                  bool &modal_shown, std::map<std::string, std::map<int32_t, ftxui::Component>> &spnSettingsFormMap,
                   spn_settings_map_t &spnSettingsMap)
-        : m_canid_(canid), m_screen_(screen), m_smap_(smap), m_cmpCont_(cmpCont),
+        : m_canid_(canid), m_screen_(screen), m_smap_(smap), m_data_getter_(std::move(data_getter)),
           m_spnSettingsFormMap_(spnSettingsFormMap), m_spnSettingsMap_(spnSettingsMap) {
       static size_t spns_count = 0u;
 
@@ -55,6 +55,7 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
                   ftxui::Checkbox({
                       .transform = [this](const ftxui::EntryState &state) -> ftxui::Element {
                         return ftxui::hbox({
+                            ftxui::separatorEmpty(),
                             ftxui::text(" >[add_parameter]< ") | (state.focused ? ftxui::bold : ftxui::nothing) |
                                 ftxui::color(ftxui::Color::Cyan) |
                                 (state.focused ? ftxui::bgcolor(ftxui::Color::Grey11) : ftxui::nothing),
@@ -79,6 +80,7 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
                   ftxui::Checkbox({
                       .transform = [this](const ftxui::EntryState &state) -> ftxui::Element {
                         return ftxui::hbox({
+                            ftxui::separatorEmpty(),
                             ftxui::text(" >[remove_selected_params]< ") |
                                 (state.focused ? ftxui::bold : ftxui::nothing) | ftxui::color(ftxui::Color::Cyan) |
                                 (state.focused ? ftxui::bgcolor(ftxui::Color::Grey11) : ftxui::nothing),
@@ -147,13 +149,7 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
       };
 
       auto get_data = [this]() -> std::vector<uint8_t> {
-        for (uint32_t i = 0; i < m_cmpCont_->ChildCount(); i++) {
-          if (std::static_pointer_cast<CanIDUnit>(m_cmpCont_->ChildAt(i))->getCanID() == m_canid_) {
-            return std::static_pointer_cast<CanIDUnit>(m_cmpCont_->ChildAt(i))->getData();
-          }
-        }
-
-        return {};
+        return m_data_getter_ ? m_data_getter_() : std::vector<uint8_t>{};
       };
 
       // Fragment tab container — shows fields for active fragment
@@ -306,8 +302,8 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
             bits.push_back(ftxui::text(","));
           }
 
-          bin_els.push_back(ftxui::hbox(std::move(bits)));
-          bin_els.push_back(ftxui::text("    "));
+          // Force each byte cell to the same 15-char width as the hex/dec rows so the closing `}` aligns.
+          bin_els.push_back(ftxui::hbox(std::move(bits)) | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 15));
         }
 
         bin_els.push_back(ftxui::text(" }"));
@@ -374,12 +370,17 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
         });
       });
 
+      // Upper bound on fragments a single custom (manual-mode) SPN may have.
+      static constexpr auto max_fragments = 5u;
+
       // Fragment buttons + switcher (full width, above the main horizontal layout)
       auto frag_switcher = ftxui::Container::Vertical({
           ftxui::Container::Horizontal({
               ftxui::Checkbox({
-                  .transform = [](const ftxui::EntryState &state) -> ftxui::Element {
-                    auto el = ftxui::text(">[add_fragment]<") | ftxui::color(ftxui::Color::Cyan);
+                  .transform = [&s](const ftxui::EntryState &state) -> ftxui::Element {
+                    const bool at_limit = s.fragments.size() >= max_fragments;
+                    auto el = ftxui::text(">[add_fragment]<") |
+                              ftxui::color(at_limit ? ftxui::Color::GrayDark : ftxui::Color::Cyan);
                     if (state.focused || state.active) {
                       el = el | ftxui::bold | ftxui::bgcolor(ftxui::Color::Grey11);
                     }
@@ -389,6 +390,8 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
 
                   .on_change =
                       [&s, rebuild_frag_fields]() {
+                        if (s.fragments.size() >= max_fragments)
+                          return;
                         s.fragments.push_back({});
                         s.active_fragment = static_cast<int32_t>(s.fragments.size()) - 1;
                         rebuild_frag_fields();
@@ -396,8 +399,10 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
               }),
               ftxui::Renderer([]() { return ftxui::text("  "); }),
               ftxui::Checkbox({
-                  .transform = [](const ftxui::EntryState &state) -> ftxui::Element {
-                    auto el = ftxui::text(">[remove_fragment]<") | ftxui::color(ftxui::Color::Cyan);
+                  .transform = [&s](const ftxui::EntryState &state) -> ftxui::Element {
+                    const bool at_limit = s.fragments.size() <= 1;
+                    auto el = ftxui::text(">[remove_fragment]<") |
+                              ftxui::color(at_limit ? ftxui::Color::GrayDark : ftxui::Color::Cyan);
                     if (state.focused || state.active)
                       el = el | ftxui::bold | ftxui::bgcolor(ftxui::Color::Grey11);
                     return el;
@@ -489,6 +494,7 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
               ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 5),
 
           ftxui::Container::Vertical({
+              make_field("SPN id:", "enter id here ...", &s.spn_id),
               make_field("SPN name:", "enter name here ...", &s.spn_name),
               make_field("SPN resolution:", "enter resolution here ...", &s.resolution),
               make_field("SPN offset:", "enter offset here ...", &s.offset),
@@ -538,11 +544,11 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
     std::string m_canid_;
     ftxui::ScreenInteractive *m_screen_;
     signals_map_t &m_smap_;
-    ftxui::Component m_cmpCont_;
+    std::function<std::vector<uint8_t>()> m_data_getter_;
     std::map<std::string, std::map<int32_t, ftxui::Component>> &m_spnSettingsFormMap_;
     spn_settings_map_t &m_spnSettingsMap_;
   };
 
-  return ftxui::Make<Impl>(screen, smap, canid, canid_active, cmpCont, dialog, modal_shown, spnSettingsFormMap,
-                           spnSettingsMap);
+  return ftxui::Make<Impl>(screen, smap, canid, canid_active, std::move(data_getter), dialog, modal_shown,
+                           spnSettingsFormMap, spnSettingsMap);
 }
