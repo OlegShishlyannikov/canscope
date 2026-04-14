@@ -18,13 +18,18 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 
 ### Screenshots
 
-|---|---|
-| **SPN viewer** - `verbose` tab, full PGN/SPN breakdown with live values | **Live charts** - per-SPN scatter plot with auto-scaled Y axis |
-| ![spn_viewer](pics/spn_viewer.png) | ![charts](pics/charts.png) |
-| **Reverse engineering** - `manual` tab, build custom SPN from raw bits with live payload highlighting | **Regex search** - filter by CAN ID / PGN label |
-| ![reverse-engineering](pics/reverse-engineering.png) | ![regex_search](pics/regex_search.png) |
-| **Parameter export** - select SPNs across CAN IDs for JSON export | **Playback** - replay recorded SQLite sessions |
-| ![spn_export_view](pics/spn_export_view.png) | ![playback](pics/playback.png) |
+**SPN viewer** - `verbose` tab, full PGN/SPN breakdown with live values
+![spn_viewer](pics/spn_viewer.png)
+**Live charts** - per-SPN scatter plot with auto-scaled Y axis
+![charts](pics/charts.png)
+**Reverse engineering** - `manual` tab, build custom SPN from raw bits with live payload highlighting
+![reverse-engineering](pics/reverse-engineering.png)
+**Regex search** - filter by CAN ID / PGN label
+![regex_search](pics/regex_search.png)
+**Parameter export** - select SPNs across CAN IDs for JSON export
+![spn_export_view](pics/spn_export_view.png)
+**Playback** - replay recorded SQLite sessions
+![playback](pics/playback.png)
 
 ## Build
 
