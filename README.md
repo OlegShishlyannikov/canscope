@@ -6,13 +6,26 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 
 ## Features
 
-- **TUI mode** - full-screen interactive terminal interface (FTXUI). Multiple display modes per CAN ID: deployed, brief, verbose, manual, little-endian
-- **Headless mode** - JSON output to stdout or file, for scripting and automation
+- **TUI mode** - full-screen interactive terminal interface (FTXUI). Four display modes per CAN ID: `brief`, `verbose`, `charts`, `manual`
+- **Per-SPN live charts** - scatter plot (braille canvas) per numeric SPN with auto-scaled Y axis, switchable between all SPNs of the PGN
+- **Regex search/filter** - filter the CAN ID list by regex over identifier and PGN label
+- **Headless mode** - NDJSON output to stdout, for scripting and automation
 - **Recording** - decoded J1939 SPN values saved to SQLite database with gzip compression and batch flushing
-- **J1939 decoding** - PGN/SPN lookup, bit-level value extraction from payload. Supports xlsx and csv input formats
 - **CAN playback** - replay recorded CAN frames
-- **Custom SPN configuration** - per-parameter settings, parameter export
+- **Custom SPN configuration** - per-parameter settings (up to 5 fragments), user-defined id/name/unit/resolution/offset/endianness. Custom SPNs also appear in the charts tab
+- **Candump parser hardening** - strict per-frame validation (CAN ID length & hex, DLC format, payload byte count, 64-byte upper bound, DLC vs actual byte count). Error frames counted in the status bar, RTR frames silently dropped
 - **Real-time** - 30 fps UI refresh
+
+### Screenshots
+
+| | |
+|---|---|
+| **SPN viewer** - `verbose` tab, full PGN/SPN breakdown with live values | **Live charts** - per-SPN scatter plot with auto-scaled Y axis |
+| ![spn_viewer](pics/spn_viewer.png) | ![charts](pics/charts.png) |
+| **Reverse engineering** - `manual` tab, build custom SPN from raw bits with live payload highlighting | **Regex search** - filter by CAN ID / PGN label |
+| ![reverse-engineering](pics/reverse-engineering.png) | ![regex_search](pics/regex_search.png) |
+| **Parameter export** - select SPNs across CAN IDs for JSON export | **Playback** - replay recorded SQLite sessions |
+| ![spn_export_view](pics/spn_export_view.png) | ![playback](pics/playback.png) |
 
 ## Build
 
@@ -91,17 +104,17 @@ Requires Docker. SSH keys from `~/.ssh` and `/etc/hosts` are forwarded into the 
 All operating modes are mutually exclusive. If none is specified, TUI mode is used.
 
 ```bash
-# TUI mode (default) — interactive terminal interface
+# TUI mode (default) - interactive terminal interface
 canscope -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
-# Discover mode — output PGN/SPN structure (no values) to stdout or file
+# Discover mode - output PGN/SPN structure (no values) to stdout or file
 canscope -discover -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 canscope -discover -of discovered.json -e "candump can0" -j1939-csv thirdparty/j1939da_2018.csv
 
-# Headless mode — stream all decoded values (NDJSON) to stdout
+# Headless mode - stream all decoded values (NDJSON) to stdout
 canscope -hl -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
-# Record mode — write all decoded values + timestamps to SQLite
+# Record mode - write all decoded values + timestamps to SQLite
 canscope -rec -db recording.db -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
 # Read from stdin (pipe)
