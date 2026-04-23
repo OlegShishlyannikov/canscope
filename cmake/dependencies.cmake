@@ -101,6 +101,38 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(json)
 
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_FORMAT_SOURCE OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  yaml_cpp
+  GIT_REPOSITORY git@github.com:jbeder/yaml-cpp.git
+  GIT_TAG        0.8.0
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS   TRUE
+)
+
+FetchContent_MakeAvailable(yaml_cpp)
+
+# zlib is required for gzip batch compression in the recorder and for batch
+# decompression in the replay generator. System libz on Arch/Manjaro ships only
+# .so; for static builds we need libz.a, so we fetch and build it ourselves —
+# same pattern used for sqlite3. The resulting `zlibstatic` target is linked in
+# for both shared and static canscope builds to keep the link line uniform.
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  zlib
+  GIT_REPOSITORY git@github.com:madler/zlib.git
+  GIT_TAG        v1.3.1
+  GIT_SHALLOW    TRUE
+  GIT_PROGRESS   TRUE
+)
+
+FetchContent_MakeAvailable(zlib)
+
 FetchContent_Declare(
   clipp
   GIT_REPOSITORY git@github.com:muellan/clipp.git

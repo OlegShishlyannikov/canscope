@@ -56,11 +56,13 @@ int32_t main(int32_t argc, char *argv[]) {
   static std::unique_ptr<Recorder> recorder;
   static std::unique_ptr<DiscovererHandler> discoverer_handler;
   static std::unique_ptr<HeadlessStreamer> headless_streamer;
+  static std::shared_ptr<void> playback_handle;
 
-  enum class Mode { tui, discover, record, headless } mode = Mode::tui;
+  enum class Mode { tui, discover, record, headless, play } mode = Mode::tui;
+  int32_t mode_flag_count = 0;
 
   static struct {
-    std::string xlsx_file, csv_file, command = "", output_file = "", record_db_path = "";
+    std::string xlsx_file, csv_file, command = "", output_file = "", record_db_path = "", play_config_path = "";
     bool show_help = false;
   } cli_opts;
 
@@ -74,21 +76,39 @@ int32_t main(int32_t argc, char *argv[]) {
 
         clipp::option("-dscvr, --discovery-mode")
             .doc("Discover mode: output PGN/SPN structure (only first received falue) to stdout or file")
-            .call([&]() { mode = Mode::discover; }),
+            .call([&]() {
+              mode = Mode::discover;
+              ++mode_flag_count;
+            }),
 
         clipp::option("-hl", "--headless")
             .doc("Headless mode: stream all decoded PGN/SPN values to stdout")
-            .call([&]() { mode = Mode::headless; }),
+            .call([&]() {
+              mode = Mode::headless;
+              ++mode_flag_count;
+            }),
 
         clipp::option("-rec", "--record")
             .doc("Record mode: write all decoded PGN/SPN values + timestamps to SQLite DB")
-            .call([&]() { mode = Mode::record; }),
+            .call([&]() {
+              mode = Mode::record;
+              ++mode_flag_count;
+            }),
 
         clipp::option("-of", "--output-file") &
             clipp::value("Output file", cli_opts.output_file).doc("Output file path (used with -discover)"),
 
         clipp::option("-db", "--database") & clipp::value("SQLite output database path", cli_opts.record_db_path)
                                                  .doc("SQLite database path (used with -rec)"),
+
+        (clipp::option("-play", "--playback-mode")
+             .call([&]() {
+               mode = Mode::play;
+               ++mode_flag_count;
+             })
+             .doc("Play mode: send synthetic CAN frames per YAML config. "
+                  "Optional path; defaults to /etc/canscope/playback.yaml. Exclusive with other modes.") &
+         clipp::opt_value("Playback YAML config", cli_opts.play_config_path)),
 
         clipp::option("-e", "--execute-command") &
             clipp::value("command", cli_opts.command).call([&]() {}).doc("execute cli command to read its output"),
@@ -128,6 +148,15 @@ int32_t main(int32_t argc, char *argv[]) {
     if (mode == Mode::record && cli_opts.record_db_path.empty()) {
       fmt::println(stderr, "Error: -rec requires -db <path>");
       return -1;
+    }
+
+    if (mode_flag_count > 1) {
+      fmt::println(stderr, "Error: modes -dscvr / -hl / -rec / -play are mutually exclusive");
+      return -1;
+    }
+
+    if (mode == Mode::play && cli_opts.play_config_path.empty()) {
+      cli_opts.play_config_path = "/etc/canscope/playback.yaml";
     }
   }
 
@@ -236,15 +265,19 @@ int32_t main(int32_t argc, char *argv[]) {
     }
   };
 
+  const bool needs_input = (mode != Mode::play);
+
   // If reading from stdin pipe, save the pipe fd and reopen stdin as /dev/tty for FTXUI
   static int candump_fd = -1;
-  if (cli_opts.command.empty()) {
+  if (needs_input && cli_opts.command.empty()) {
     candump_fd = ::dup(STDIN_FILENO);
     std::freopen("/dev/tty", "r", stdin);
   }
 
   // Reads candump data from stdin pipe or subprocess and aggregates it
-  auto aggregator_task = std::async(
+  std::future<void> aggregator_task;
+  if (needs_input) {
+    aggregator_task = std::async(
       std::launch::async,
       [command = cli_opts.command](std::stop_token stop_token) {
         if (command.empty()) {
@@ -327,9 +360,12 @@ int32_t main(int32_t argc, char *argv[]) {
       },
 
       aggregator_task_stop.get_token());
+  }  // if (needs_input)
 
   // UI refresh task: compares snapshots at ~30fps and emits signals for changed entries
-  auto refresh_task = std::async(
+  std::future<void> refresh_task;
+  if (needs_input)
+    refresh_task = std::async(
       std::launch::async,
       [](std::stop_token stop_token) {
         using aggregated_t = std::map<std::string, std::map<std::string, std::shared_ptr<can_frame_data_s>>>;
@@ -440,6 +476,19 @@ int32_t main(int32_t argc, char *argv[]) {
         ->connect([](const std::vector<can_frame_update_s> &batch) { headless_streamer->onBatch(batch); });
   }
 
+  if (mode == Mode::play) {
+    extern std::shared_ptr<void> makePlayback(const std::string &yaml_path, sqlite::database &db, bool console_output);
+
+    signals.map.get<void(sqlite::database &)>("j1939_database_ready")->connect([](sqlite::database &db) {
+      try {
+        playback_handle = makePlayback(cli_opts.play_config_path, db, true);
+      } catch (const std::exception &e) {
+        fmt::println(stderr, "Playback failed: {}", e.what());
+        headless_task_stop.request_stop();
+      }
+    });
+  }
+
   bool run_tui = (mode == Mode::tui);
 
   if (run_tui) {
@@ -490,7 +539,14 @@ int32_t main(int32_t argc, char *argv[]) {
         headless_task_stop.get_token());
   }
 
-  // Wait for all tasks to finish (with timeout)
+  // For non-TUI modes, block main on headless_task until SIGINT is received.
+  // In TUI mode this task is never launched and we skip straight to cleanup.
+  if (headless_task.valid()) {
+    headless_task.wait();
+  }
+
+  // Cleanup grace period: once stop_sources have been requested (by SIGINT handler
+  // or by TUI loop exit), give each task up to 3s to wind down before destruction.
   {
     const char *names[] = {"xlsx_parser", "aggregator", "refresh", "headless"};
     int idx = 0;
@@ -508,6 +564,10 @@ int32_t main(int32_t argc, char *argv[]) {
     recorder->flushAndClose();
     fmt::println("Done. Database saved to: {}", cli_opts.record_db_path);
     recorder.reset();
+  }
+
+  if (playback_handle) {
+    playback_handle.reset();  // triggers Impl dtor -> stops sender tasks
   }
 
   return 0;

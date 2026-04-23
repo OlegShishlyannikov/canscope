@@ -6,6 +6,11 @@ JOBS := $(shell nproc)
 
 PREFIX ?= /usr/local
 INSTALL_DIR := $(DESTDIR)$(PREFIX)/canscope
+DATA_DIR    := $(DESTDIR)/usr/share/canscope
+CONFIG_DIR  := $(DESTDIR)/etc/canscope
+
+J1939_DATA_FILES := thirdparty/j1939da_2018.xlsx thirdparty/j1939da_2018.csv
+CONFIG_FILES     := playback.yaml
 
 DEV_IMAGE   := canscope-dev
 BUILD_DOCKER := build/docker
@@ -56,18 +61,22 @@ build_static: ## Build $(HOST_ARCH) (static linking)
 		-DSTATIC=ON
 	cmake --build $(BUILD_STATIC)
 
-install: ## Install binary to PREFIX/bin, shared libs to PREFIX/canscope/lib
+install: ## Install binary to PREFIX/bin, shared libs to PREFIX/canscope/lib, J1939 data to /usr/share/canscope, default playback config to /etc/canscope
 	@test -f $(BUILD_DIR)/canscope || { echo "Error: run 'make build' first"; exit 1; }
-	install -d $(DESTDIR)$(PREFIX)/bin $(INSTALL_DIR)/lib
+	install -d $(DESTDIR)$(PREFIX)/bin $(INSTALL_DIR)/lib $(DATA_DIR) $(CONFIG_DIR)
 	install -m 755 $(BUILD_DIR)/canscope $(DESTDIR)$(PREFIX)/bin/
 	patchelf --set-rpath '$$ORIGIN/../canscope/lib' $(DESTDIR)$(PREFIX)/bin/canscope
 	find $(BUILD_DIR)/_deps -name '*.so*' -type f -exec install -m 755 {} $(INSTALL_DIR)/lib/ \;
 	find $(BUILD_DIR)/_deps -name '*.so*' -type l -exec cp -a {} $(INSTALL_DIR)/lib/ \;
+	install -m 644 $(J1939_DATA_FILES) $(DATA_DIR)/
+	install -m 644 $(CONFIG_FILES) $(CONFIG_DIR)/
 
-install_static: ## Install static binary to PREFIX/bin
+install_static: ## Install static binary to PREFIX/bin, J1939 data to /usr/share/canscope, default playback config to /etc/canscope
 	@test -f $(BUILD_STATIC)/canscope || { echo "Error: run 'make build_static' first"; exit 1; }
-	install -d $(DESTDIR)$(PREFIX)/bin
+	install -d $(DESTDIR)$(PREFIX)/bin $(DATA_DIR) $(CONFIG_DIR)
 	install -m 755 $(BUILD_STATIC)/canscope $(DESTDIR)$(PREFIX)/bin/
+	install -m 644 $(J1939_DATA_FILES) $(DATA_DIR)/
+	install -m 644 $(CONFIG_FILES) $(CONFIG_DIR)/
 
 docker-run: ## Build and run in Docker (works on Linux/Mac/Windows)
 	docker build -t $(DEV_IMAGE) -f docker/Dockerfile.dev .

@@ -1,0 +1,92 @@
+# canscope headless playback - procedural CAN frame generator.
+#
+# Usage:
+#   canscope -j1939-csv /usr/share/canscope/j1939da_2018.csv -play
+#   canscope -j1939-csv ...                                  -play /path/to/config.yaml
+#
+# Without a path after -play, canscope loads /etc/canscope/playback.yaml (this file).
+# A J1939 database (-j1939-csv or -j1939-xlsx) is required to resolve PGNs and SPNs.
+#
+# Each entry under `frames:` spawns its own sender task that builds a payload from
+# the listed SPNs and writes it to the SocketCAN interface at the given period.
+# Missing PGNs/SPNs are warned about and skipped; valid SPNs in the same frame
+# still go out.
+#
+# SPN value sources:
+#   - `value: <number>`           - constant shortcut
+#   - `generator: { type: ..., ... }` - procedural waveform or replay source
+#
+# Supported generator types:
+#   const    { value }
+#   ramp     { from?, to?, duration_ms, mode: once|loop|pingpong }
+#   sine     { period_ms, min?, max?, phase_deg? }
+#   square   { period_ms, duty?, min?, max? }
+#   triangle { period_ms, min?, max? }
+#   sawtooth { period_ms, min?, max? }
+#   pulse    { period_ms, pulse_ms, min?, max? }
+#   noise    { min?, max?, seed? }
+#   walk     { step, min?, max?, seed? }
+#   replay   { db, pgn?, spn?, loop?, speed? }
+#
+# When `min` / `max` are omitted the SPN's own Data Range from the J1939 DB is used.
+
+interface: vcan0        # default SocketCAN interface
+priority: 6            # default J1939 priority (0..7)
+address: 0             # default source address (SA, low 8 bits of CAN ID)
+
+frames:
+  # Wheel-based vehicle speed - sinusoidal sweep across the full SPN range.
+  - pgn: 0xFEF1        # Cruise Control / Vehicle Speed 1
+    period_ms: 100
+    spns:
+      - spn: 84        # Wheel-Based Vehicle Speed
+        generator:
+          type: sine
+          period_ms: 10000
+
+  # Engine speed - ping-pong ramp between idle and high RPM.
+  - pgn: 0xF004        # Electronic Engine Controller 1
+    period_ms: 50
+    spns:
+      - spn: 190       # Engine Speed
+        generator:
+          type: ramp
+          from: 700
+          to: 3500
+          duration_ms: 15000
+          mode: pingpong
+
+  # Engine coolant temperature - random walk around typical operating range.
+  - pgn: 0xFEEE        # Engine Temperature 1
+    period_ms: 1000
+    spns:
+      - spn: 110       # Engine Coolant Temperature
+        generator:
+          type: walk
+          step: 0.5
+          min: 80
+          max: 100
+
+  # Piklema proprietary PGN - slow sawtooth fuel level plus a constant weight.
+  - pgn: 0xFF82        # Piklema Load and Inclinometer
+    period_ms: 500
+    spns:
+      - spn: 900005    # Fuel level
+        generator:
+          type: sawtooth
+          period_ms: 60000
+      - spn: 900009    # Static weight
+        value: 42
+
+  # Replay example - stream values from a previously recorded -rec database.
+  # Uncomment and point `db` at an existing .db file to enable.
+  #
+  # - pgn: 0xFEF1
+  #   period_ms: 100
+  #   spns:
+  #     - spn: 84
+  #       generator:
+  #         type: replay
+  #         db: /var/lib/canscope/session.db
+  #         loop: true
+  #         speed: 1.0
