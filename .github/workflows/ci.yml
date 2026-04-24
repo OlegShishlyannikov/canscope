@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Unit tests (Catch2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rewrite git SSH URLs to HTTPS
+        run: |
+          git config --global url.https://github.com/.insteadOf git@github.com:
+          git config --global url.https://gitlab.com/.insteadOf git@gitlab.com:
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld cmake ninja-build git \
+            autoconf automake libtool make pkg-config \
+            libboost-all-dev libsqlite3-dev zlib1g-dev libicu-dev
+
+      - name: make tests
+        run: make tests
+
+  x86_64:
+    name: Build x86_64 (dynamic + static)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # FetchContent in cmake/dependencies.cmake clones via git@github.com:/git@gitlab.com: (SSH).
+      # Runner has no SSH keys — rewrite to HTTPS for git on the host.
+      - name: Rewrite git SSH URLs to HTTPS
+        run: |
+          git config --global url.https://github.com/.insteadOf git@github.com:
+          git config --global url.https://gitlab.com/.insteadOf git@gitlab.com:
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld cmake ninja-build git \
+            autoconf automake libtool make pkg-config \
+            libboost-all-dev libsqlite3-dev zlib1g-dev libicu-dev
+
+      - name: make build (dynamic)
+        run: make build
+
+      - name: make build_static
+        run: make build_static
+
+      - name: Smoke test — help exits 0
+        run: |
+          ./build/native/canscope -h > /dev/null
+          ./build/native/canscope --help > /dev/null
+          ./build/native_static/canscope -h > /dev/null
+
+  arm64:
+    name: Cross-compile arm64 (dynamic + static)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU binfmt is only needed for building docker/Dockerfile.sysroot (which
+      # runs arm64 pacman inside a `--platform=linux/arm64` container to harvest
+      # arm64 boost/icu/zlib/libc headers). The cross-compile itself runs natively
+      # on x86_64 via aarch64-linux-gnu-clang.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Makefile bind-mounts $(SSH_DIR)=~/.ssh into docker containers. On a bare
+      # runner this dir may not exist — make sure the mount source is valid.
+      - name: Ensure ~/.ssh exists (bind-mount source)
+        run: mkdir -p "$HOME/.ssh"
+
+      # Override SSH_PREP inside the cross-container with the https-rewrite.
+      # The Makefile inlines $(SSH_PREP) into `bash -c '$(SSH_PREP) cmake ...'`,
+      # so we keep SSH_PREP on a single line with `;` separators. No SSH keys
+      # are read from /host_ssh; all deps clone over HTTPS.
+      - name: make build_arm64 (dynamic)
+        env:
+          SSH_PREP: 'git config --global url.https://github.com/.insteadOf git@github.com: ; git config --global url.https://gitlab.com/.insteadOf git@gitlab.com: ;'
+        run: make build_arm64
+
+      - name: make build_arm64_static
+        env:
+          SSH_PREP: 'git config --global url.https://github.com/.insteadOf git@github.com: ; git config --global url.https://gitlab.com/.insteadOf git@gitlab.com: ;'
+        run: make build_arm64_static
