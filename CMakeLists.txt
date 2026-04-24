@@ -12,6 +12,7 @@ if(NOT CMAKE_TOOLCHAIN_FILE)
 endif()
 
 option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
+option(CANSCOPE_BUILD_TESTS "Build canscope unit tests" OFF)
 include(cmake/dependencies.cmake)
 
 project(canscope)
@@ -51,4 +52,9 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ftxui::component ftxui::screen ftxui::dom tiny-process-library xlnt sqlite3_lib yaml-cpp::yaml-cpp $<IF:$<BOOL:${BUILD_SHARED_LIBS}>,zlib,zlibstatic> Boost::regex ${Boost_LIBRARIES} lely::coapp lely::co lely::can lely::io2 lely::ev lely::util)
+
+if(CANSCOPE_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
 

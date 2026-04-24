@@ -31,6 +31,7 @@
 #include <boost/spirit/include/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
 
+#include "candump_parser.hpp"
 #include "discoverer.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/screen_interactive.hpp"
@@ -168,171 +169,35 @@ int32_t main(int32_t argc, char *argv[]) {
 
   // Parse a single candump line and aggregate it
   static const auto parse_candump_line = [](const std::string &line) {
-    enum class field_e : size_t {
-      INTERFACE = 0,
-      CANID = 1,
-      DLC = 2,
-      PAYLOAD_BEGIN = 3,
-    };
-
-    constexpr auto idx = [](enum field_e f) consteval { return static_cast<size_t>(f); };
-    if (line.empty()) {
+    auto parsed = parseCandumpLine(line);
+    switch (parsed.kind) {
+    case parsed_candump_s::kind_e::invalid:
+    case parsed_candump_s::kind_e::remote_frame:
       return;
+    case parsed_candump_s::kind_e::error_frame:
+      g_error_frame_count.fetch_add(1, std::memory_order_relaxed);
+      return;
+    case parsed_candump_s::kind_e::data:
+      break;
     }
 
-    int64_t ts_ms = 0;
-    std::string_view rest = line;
+    auto raw = std::make_shared<raw_frame_s>(raw_frame_s{
+        .ts_ms = parsed.ts_ms,
+        .iface = parsed.iface,
+        .canid = parsed.canid,
+        .payload = parsed.payload,
+    });
 
-    while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) {
-      rest.remove_prefix(1);
+    can_frame_data_s entry;
+    entry.payload = parsed.payload;
+    entry.size = static_cast<int32_t>(parsed.payload.size());
+
+    {
+      std::lock_guard<std::mutex> lock(rw_mtx);
+      aggregated[raw->iface][raw->canid] = std::make_shared<can_frame_data_s>(std::move(entry));
     }
 
-    if (!rest.empty() && rest.front() == '(') {
-      auto close = rest.find(')');
-
-      if (close != std::string_view::npos) {
-        std::string inner(rest.substr(1, close - 1));
-        rest.remove_prefix(close + 1);
-
-        while (!rest.empty() && rest.front() == ' ') {
-          rest.remove_prefix(1);
-        }
-
-        char *end = nullptr;
-        double ts_s = std::strtod(inner.c_str(), &end);
-
-        if (end == inner.c_str() + inner.size() && ts_s > 1e9) {
-          ts_ms = static_cast<int64_t>(ts_s * 1000.0);
-        } else {
-          int Y = 0, Mo = 0, D = 0, H = 0, Mi = 0;
-          double S = 0.f;
-
-          if (std::sscanf(inner.c_str(), "%d-%d-%d %d:%d:%lf", &Y, &Mo, &D, &H, &Mi, &S) == 6) {
-            std::tm tm{
-                .tm_year = Y - 1900,
-                .tm_mon = Mo - 1,
-                .tm_mday = D,
-                .tm_hour = H,
-                .tm_min = Mi,
-                .tm_sec = static_cast<int>(S),
-                .tm_isdst = -1,
-            };
-
-            std::time_t t = std::mktime(&tm);
-
-            if (t != -1) {
-              double frac = S - static_cast<int64_t>(S);
-              ts_ms = static_cast<int64_t>(t) * 1000 + static_cast<int64_t>(frac * 1000.f);
-            }
-          }
-        }
-      }
-    }
-
-    if (ts_ms == 0) {
-      ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-                  .count();
-    }
-
-    std::vector<std::string_view> words;
-    for (auto part : rest | std::views::split(' ')) {
-      if (!part.empty()) {
-        words.emplace_back(part.begin(), part.end());
-      }
-    }
-
-    if (words.size() > idx(field_e::PAYLOAD_BEGIN)) {
-      auto &iface = words[idx(field_e::INTERFACE)];
-      can_frame_data_s entry;
-      auto &canid = words[idx(field_e::CANID)];
-
-      // Validate CAN ID: 3 hex digits (SFF, 11-bit) or 8 (EFF, 29-bit)
-      {
-        constexpr auto sff_length_bytes = 3u, eff_length_bytes = 8u;
-
-        // Check CAN_ID length
-        if (canid.size() != sff_length_bytes && canid.size() != eff_length_bytes) {
-          return;
-        }
-
-        // Check CAN_ID symbols
-        for (const char &c : canid) {
-          if (!std::isxdigit(static_cast<uint8_t>(c))) {
-            return;
-          }
-        }
-      }
-
-      // Parse DLC
-      {
-        auto &dlc = words[idx(field_e::DLC)];
-        if (dlc.size() < 3 /* [${size}] format  */ || dlc.front() != '[' || dlc.back() != ']') {
-          return;
-        }
-
-        auto sv = dlc.substr(1, dlc.size() - 2);
-        if (auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), entry.size);
-            ec != std::errc{} || ptr != sv.data() + sv.size()) {
-          return;
-        }
-
-        // Max payload per CAN frame: 8 (Classic CAN) / 64 (CAN FD). Use 64 as upper bound.
-        constexpr int32_t max_payload_bytes = 64;
-        if (entry.size < 0 || entry.size > max_payload_bytes) {
-          return;
-        }
-      }
-
-      // Detect ERRORFRAME marker (SocketCAN diagnostic pseudo-frame): count and drop
-      if (words.back() == "ERRORFRAME") {
-        g_error_frame_count.fetch_add(1, std::memory_order_relaxed);
-        return;
-      }
-
-      // Detect RTR: candump prints "remote request" in place of payload bytes. Drop silently.
-      if (words[idx(field_e::PAYLOAD_BEGIN)] == "remote") {
-        return;
-      }
-
-      // Parse payload bytes directly
-      entry.payload.reserve(words.size() - idx(field_e::PAYLOAD_BEGIN));
-
-      for (size_t i = idx(field_e::PAYLOAD_BEGIN); i < words.size(); ++i) {
-        if (words[i].size() != 2) { // each byte must be exactly 2 hex digits
-          return;
-        }
-
-        uint8_t byte = 0;
-        auto *first = words[i].data();
-        auto *last = first + words[i].size();
-
-        if (auto [ptr, ec] = std::from_chars(first, last, byte, 16 /* HEX format */);
-            ec != std::errc{} || ptr != last) {
-          return;
-        }
-
-        entry.payload.push_back(byte);
-      }
-
-      // DLC must match the actual number of payload bytes
-      if (entry.payload.size() != entry.size) {
-        return;
-      }
-
-      auto raw = std::make_shared<raw_frame_s>(raw_frame_s{
-          .ts_ms = ts_ms,
-          .iface = std::string(iface),
-          .canid = std::string(canid),
-          .payload = entry.payload,
-      });
-
-      {
-        std::lock_guard<std::mutex> lock(rw_mtx);
-        aggregated[raw->iface][raw->canid] = std::make_shared<can_frame_data_s>(std::move(entry));
-      }
-
-      signals_s::map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")->operator()(raw);
-    }
+    signals_s::map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")->operator()(raw);
   };
 
   const bool needs_input = (mode != Mode::play);

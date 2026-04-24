@@ -2,6 +2,7 @@ BUILD_DIR := build/native
 BUILD_STATIC := build/native_static
 BUILD_ARM64 := build/arm64
 BUILD_ARM64_ST := build/arm64_static
+BUILD_TESTS := build/tests
 JOBS := $(shell nproc)
 
 PREFIX ?= /usr/local
@@ -43,7 +44,7 @@ SSH_PREP ?= set -euo pipefail; \
 	export GIT_SSH_COMMAND="ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -i $$KEY";
 
 .PHONY: build build_static install install_static docker-run \
-        build_arm64 build_arm64_static clean list
+        build_arm64 build_arm64_static tests clean list
 
 HOST_OS   := $(shell uname -s)
 HOST_ARCH := $(shell uname -m)
@@ -122,6 +123,13 @@ build_arm64_static: ## Cross-compile for arm64 (static linking, in Docker)
 			-DBUILD_SHARED_LIBS=OFF \
 			-DSTATIC=ON \
 			&& cmake --build $(BUILD_ARM64_ST)'
+
+tests: ## Build and run unit tests (Catch2)
+	cmake -G Ninja -B $(BUILD_TESTS) -S . $(CMAKE_COMMON) \
+		-DBUILD_SHARED_LIBS=ON \
+		-DCANSCOPE_BUILD_TESTS=ON
+	cmake --build $(BUILD_TESTS) --target canscope_tests
+	ctest --test-dir $(BUILD_TESTS) --output-on-failure
 
 clean: ## Remove all build directories
 	rm -rf build
