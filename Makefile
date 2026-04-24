@@ -104,6 +104,8 @@ build_arm64: ## Cross-compile for arm64 (dynamic linking, in Docker)
 		bash -c '$(SSH_PREP) cmake -G Ninja -B $(BUILD_ARM64) -S . $(CMAKE_COMMON) \
 			-DCMAKE_TOOLCHAIN_FILE=/app/$(TOOLCHAIN) \
 			-DSYSROOT=$(DOCKER_SYSROOT) \
+			-DBUILD_SHARED_LIBS=ON \
+			-DCMAKE_INSTALL_RPATH=\$$ORIGIN/../canscope/lib \
 			&& cmake --build $(BUILD_ARM64)'
 
 build_arm64_static: ## Cross-compile for arm64 (static linking, in Docker)

@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -10,7 +11,7 @@ on:
 jobs:
   tests:
     name: Unit tests (Catch2)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -32,12 +33,10 @@ jobs:
 
   x86_64:
     name: Build x86_64 (dynamic + static)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      # FetchContent in cmake/dependencies.cmake clones via git@github.com:/git@gitlab.com: (SSH).
-      # Runner has no SSH keys — rewrite to HTTPS for git on the host.
       - name: Rewrite git SSH URLs to HTTPS
         run: |
           git config --global url.https://github.com/.insteadOf git@github.com:
@@ -49,7 +48,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang lld cmake ninja-build git \
             autoconf automake libtool make pkg-config \
-            libboost-all-dev libsqlite3-dev zlib1g-dev libicu-dev
+            libboost-all-dev libsqlite3-dev zlib1g-dev libicu-dev \
+            patchelf zip
 
       - name: make build (dynamic)
         run: make build
@@ -63,28 +63,50 @@ jobs:
           ./build/native/canscope --help > /dev/null
           ./build/native_static/canscope -h > /dev/null
 
+      # Packaging only on tag pushes; nothing is uploaded for plain main pushes
+      # or PRs (artifacts would be deleted anyway, so we save the time/disk).
+      - name: Package linux x86_64 dynamic
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: scripts/package_linux.sh x86_64 dynamic build/native "$GITHUB_REF_NAME" ubuntu-24.04
+
+      - name: Package linux x86_64 static
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: scripts/package_linux.sh x86_64 static build/native_static "$GITHUB_REF_NAME"
+
+      - name: Package windows x86_64 (WSL installer)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: scripts/package_windows.sh build/native_static "$GITHUB_REF_NAME"
+
+      - name: Upload x86_64 + windows artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-x86_64
+          path: dist/canscope-*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload windows zip
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/canscope-*.zip
+          if-no-files-found: error
+          retention-days: 1
+
   arm64:
     name: Cross-compile arm64 (dynamic + static)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      # QEMU binfmt is only needed for building docker/Dockerfile.sysroot (which
-      # runs arm64 pacman inside a `--platform=linux/arm64` container to harvest
-      # arm64 boost/icu/zlib/libc headers). The cross-compile itself runs natively
-      # on x86_64 via aarch64-linux-gnu-clang.
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      # Makefile bind-mounts $(SSH_DIR)=~/.ssh into docker containers. On a bare
-      # runner this dir may not exist — make sure the mount source is valid.
       - name: Ensure ~/.ssh exists (bind-mount source)
         run: mkdir -p "$HOME/.ssh"
 
-      # Override SSH_PREP inside the cross-container with the https-rewrite.
-      # The Makefile inlines $(SSH_PREP) into `bash -c '$(SSH_PREP) cmake ...'`,
-      # so we keep SSH_PREP on a single line with `;` separators. No SSH keys
-      # are read from /host_ssh; all deps clone over HTTPS.
       - name: make build_arm64 (dynamic)
         env:
           SSH_PREP: 'git config --global url.https://github.com/.insteadOf git@github.com: ; git config --global url.https://gitlab.com/.insteadOf git@gitlab.com: ;'
@@ -94,3 +116,54 @@ jobs:
         env:
           SSH_PREP: 'git config --global url.https://github.com/.insteadOf git@github.com: ; git config --global url.https://gitlab.com/.insteadOf git@gitlab.com: ;'
         run: make build_arm64_static
+
+      - name: Install packaging tools
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sudo apt-get install -y --no-install-recommends patchelf
+
+      - name: Package linux arm64 dynamic
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: scripts/package_linux.sh arm64 dynamic build/arm64 "$GITHUB_REF_NAME" manjaro
+
+      - name: Package linux arm64 static
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: scripts/package_linux.sh arm64 static build/arm64_static "$GITHUB_REF_NAME"
+
+      - name: Upload arm64 artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-arm64
+          path: dist/canscope-*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, x86_64, arm64]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for auto release notes
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -lh dist/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
