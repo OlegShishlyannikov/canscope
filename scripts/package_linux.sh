@@ -39,24 +39,28 @@ mkdir -p "$STAGE/bin" "$STAGE/share/canscope" "$STAGE/etc/canscope"
 
 cp "${BUILD_DIR}/canscope" "$STAGE/bin/"
 
-# Bundle shared libraries from FetchContent + lely-install (if any). For static
-# builds these directories typically contain only .a files — find skips them.
-LIB_FOUND=0
-for src in "${BUILD_DIR}/_deps" "${BUILD_DIR}/lely-install/lib"; do
-    if [ -d "$src" ]; then
-        while IFS= read -r -d '' so; do
-            if [ "$LIB_FOUND" -eq 0 ]; then
-                mkdir -p "$STAGE/canscope/lib"
-                LIB_FOUND=1
-            fi
-            cp -a "$so" "$STAGE/canscope/lib/"
-        done < <(find "$src" \( -name '*.so' -o -name '*.so.*' \) \( -type f -o -type l \) -print0)
-    fi
-done
+# Bundle shared libraries and re-stamp RPATH only for dynamic builds.
+# Static builds may still have stray .so files in _deps from transitive
+# dependencies that ignore BUILD_SHARED_LIBS=OFF (e.g. zlib), but they are
+# not linked into the static binary and running patchelf on a static ELF
+# fails with "cannot find section '.dynamic'".
+if [ "$LINKAGE" = "dynamic" ]; then
+    LIB_FOUND=0
+    for src in "${BUILD_DIR}/_deps" "${BUILD_DIR}/lely-install/lib"; do
+        if [ -d "$src" ]; then
+            while IFS= read -r -d '' so; do
+                if [ "$LIB_FOUND" -eq 0 ]; then
+                    mkdir -p "$STAGE/canscope/lib"
+                    LIB_FOUND=1
+                fi
+                cp -a "$so" "$STAGE/canscope/lib/"
+            done < <(find "$src" \( -name '*.so' -o -name '*.so.*' \) \( -type f -o -type l \) -print0)
+        fi
+    done
 
-if [ "$LIB_FOUND" -eq 1 ]; then
-    # Re-stamp RPATH so the binary finds bundled libs regardless of install location.
-    patchelf --set-rpath '$ORIGIN/../canscope/lib' "$STAGE/bin/canscope"
+    if [ "$LIB_FOUND" -eq 1 ]; then
+        patchelf --set-rpath '$ORIGIN/../canscope/lib' "$STAGE/bin/canscope"
+    fi
 fi
 
 cp "${PROJECT_ROOT}/thirdparty/j1939da_2018.csv"  "$STAGE/share/canscope/"
