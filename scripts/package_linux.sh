@@ -28,8 +28,9 @@ OS_TAG="${5:-}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKG_NAME="canscope-${VERSION}-linux-${ARCH}-${LINKAGE}"
 if [ "$LINKAGE" = "dynamic" ] && [ -n "$OS_TAG" ]; then
-  PKG_NAME="${PKG_NAME}-${OS_TAG}"
+    PKG_NAME="${PKG_NAME}-${OS_TAG}"
 fi
+
 STAGE="${PROJECT_ROOT}/dist/stage/${PKG_NAME}"
 OUT="${PROJECT_ROOT}/dist/${PKG_NAME}.tar.gz"
 
@@ -42,20 +43,20 @@ cp "${BUILD_DIR}/canscope" "$STAGE/bin/"
 # builds these directories typically contain only .a files — find skips them.
 LIB_FOUND=0
 for src in "${BUILD_DIR}/_deps" "${BUILD_DIR}/lely-install/lib"; do
-  if [ -d "$src" ]; then
-    while IFS= read -r -d '' so; do
-      if [ "$LIB_FOUND" -eq 0 ]; then
-        mkdir -p "$STAGE/canscope/lib"
-        LIB_FOUND=1
-      fi
-      cp -a "$so" "$STAGE/canscope/lib/"
-    done < <(find "$src" \( -name '*.so' -o -name '*.so.*' \) \( -type f -o -type l \) -print0)
-  fi
+    if [ -d "$src" ]; then
+        while IFS= read -r -d '' so; do
+            if [ "$LIB_FOUND" -eq 0 ]; then
+                mkdir -p "$STAGE/canscope/lib"
+                LIB_FOUND=1
+            fi
+            cp -a "$so" "$STAGE/canscope/lib/"
+        done < <(find "$src" \( -name '*.so' -o -name '*.so.*' \) \( -type f -o -type l \) -print0)
+    fi
 done
 
 if [ "$LIB_FOUND" -eq 1 ]; then
-  # Re-stamp RPATH so the binary finds bundled libs regardless of install location.
-  patchelf --set-rpath '$ORIGIN/../canscope/lib' "$STAGE/bin/canscope"
+    # Re-stamp RPATH so the binary finds bundled libs regardless of install location.
+    patchelf --set-rpath '$ORIGIN/../canscope/lib' "$STAGE/bin/canscope"
 fi
 
 cp "${PROJECT_ROOT}/thirdparty/j1939da_2018.csv"  "$STAGE/share/canscope/"
@@ -66,7 +67,7 @@ chmod +x "$STAGE/install.sh"
 
 BUILD_TARGET_LINE="linux/${ARCH} (${LINKAGE})"
 if [ "$LINKAGE" = "dynamic" ] && [ -n "$OS_TAG" ]; then
-  BUILD_TARGET_LINE="${BUILD_TARGET_LINE}, built against ${OS_TAG}"
+    BUILD_TARGET_LINE="${BUILD_TARGET_LINE}, built against ${OS_TAG}"
 fi
 
 cat > "$STAGE/README.txt" <<EOF
