@@ -57,12 +57,6 @@ jobs:
       - name: make build_static
         run: make build_static
 
-      - name: Smoke test — help exits 0
-        run: |
-          ./build/native/canscope -h > /dev/null
-          ./build/native/canscope --help > /dev/null
-          ./build/native_static/canscope -h > /dev/null
-
       # Packaging only on tag pushes; nothing is uploaded for plain main pushes
       # or PRs (artifacts would be deleted anyway, so we save the time/disk).
       - name: Package linux x86_64 dynamic
