@@ -9,13 +9,14 @@ bool ParseJSON(const std::string &input, nlohmann::json &out) {
   class JsonParser : public nlohmann::detail::json_sax_dom_parser<nlohmann::json, void> {
   public:
     explicit JsonParser(nlohmann::json &j) : nlohmann::detail::json_sax_dom_parser<nlohmann::json, void>(j, false) {}
-    static bool parse_error(std::size_t /*position*/, const std::string & /*last_token*/, const nlohmann::json::exception &ex) {
+    static bool parse_error(std::size_t /*position*/, const std::string & /*last_token*/,
+                            const nlohmann::json::exception &ex) {
       std::cerr << std::endl;
       std::cerr << ex.what() << std::endl;
       return false;
     }
   };
-  
+
   JsonParser parser(out);
   return nlohmann::json::sax_parse(input, &parser);
 }
@@ -73,9 +74,7 @@ ftxui::Component Basic(const std::string &value, ftxui::Color c, bool is_last) {
   });
 }
 
-bool IsSuitableForTableView(const nlohmann::json &) {
-  return false;
-}
+bool IsSuitableForTableView(const nlohmann::json &) { return false; }
 
 ftxui::Component Indentation(const ftxui::Component &child) {
   return ftxui::Renderer(child, [child] {
@@ -113,10 +112,12 @@ public:
   Expander expander_;
 };
 
-ftxui::Component FromObject(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander) {
+ftxui::Component FromObject(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth,
+                            const Expander &expander) {
   class Impl : public ComponentExpandable {
   public:
-    Impl(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander) : ComponentExpandable(expander) {
+    Impl(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander)
+        : ComponentExpandable(expander) {
       Expanded() = (depth <= 1);
 
       auto children = ftxui::Container::Vertical({});
@@ -143,7 +144,8 @@ ftxui::Component FromObject(const ftxui::Component &prefix, const nlohmann::json
   return ftxui::Make<Impl>(prefix, json, is_last, depth, expander);
 }
 
-ftxui::Component FromKeyValue(const std::string &key, const nlohmann::json &value, bool is_last, int depth, const Expander &expander) {
+ftxui::Component FromKeyValue(const std::string &key, const nlohmann::json &value, bool is_last, int depth,
+                              const Expander &expander) {
   std::string str = "\"" + key + "\"";
   if (value.is_object() || value.is_array()) {
     auto prefix = ftxui::Renderer([str] {
@@ -169,16 +171,21 @@ ftxui::Component FromKeyValue(const std::string &key, const nlohmann::json &valu
   });
 }
 
-ftxui::Component FromArrayAny(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander) {
+ftxui::Component FromArrayAny(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth,
+                              const Expander &expander) {
   class Impl : public ftxui::ComponentBase {
   public:
-    Impl(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander) { Add(FromArray(prefix, json, is_last, depth, expander)); }
+    Impl(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth,
+         const Expander &expander) {
+      Add(FromArray(prefix, json, is_last, depth, expander));
+    }
   };
 
   return ftxui::Make<Impl>(prefix, json, is_last, depth, expander);
 }
 
-ftxui::Component FromArray(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander) {
+ftxui::Component FromArray(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth,
+                           const Expander &expander) {
   class Impl : public ComponentExpandable {
   public:
     Impl(ftxui::Component prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander)
@@ -229,7 +236,8 @@ ftxui::Component FromArray(const ftxui::Component &prefix, const nlohmann::json 
   return ftxui::Make<Impl>(prefix, json, is_last, depth, expander);
 }
 
-ftxui::Component FromTable(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander) {
+ftxui::Component FromTable(const ftxui::Component &prefix, const nlohmann::json &json, bool is_last, int depth,
+                           const Expander &expander) {
   class Impl : public ftxui::ComponentBase {
   public:
     Impl(ftxui::Component prefix, const nlohmann::json &json, bool is_last, int depth, const Expander &expander)
@@ -379,11 +387,13 @@ static ftxui::Component FromLiveKeyValue(std::shared_ptr<nlohmann::json> root, n
                                          const std::string &key, bool is_last, int depth, const Expander &expander);
 
 static ftxui::Component FromLiveObject(std::shared_ptr<nlohmann::json> root, nlohmann::json::json_pointer ptr,
-                                       const ftxui::Component &prefix, bool is_last, int depth, const Expander &expander) {
+                                       const ftxui::Component &prefix, bool is_last, int depth,
+                                       const Expander &expander) {
   class Impl : public ComponentExpandable {
   public:
-    Impl(std::shared_ptr<nlohmann::json> root, nlohmann::json::json_pointer ptr,
-         const ftxui::Component &prefix, bool is_last, int depth, const Expander &expander) : ComponentExpandable(expander) {
+    Impl(std::shared_ptr<nlohmann::json> root, nlohmann::json::json_pointer ptr, const ftxui::Component &prefix,
+         bool is_last, int depth, const Expander &expander)
+        : ComponentExpandable(expander) {
       Expanded() = (depth <= 1);
 
       const auto &json = root->at(ptr);
@@ -392,7 +402,8 @@ static ftxui::Component FromLiveObject(std::shared_ptr<nlohmann::json> root, nlo
 
       for (auto &it : json.items()) {
         bool is_children_last = --size == 0;
-        children->Add(Indentation(FromLiveKeyValue(root, ptr / it.key(), it.key(), is_children_last, depth + 1, expander_)));
+        children->Add(
+            Indentation(FromLiveKeyValue(root, ptr / it.key(), it.key(), is_children_last, depth + 1, expander_)));
       }
 
       children->Add(ftxui::Renderer([is_last] { return ftxui::text(is_last ? "}" : "},"); }));
@@ -409,11 +420,13 @@ static ftxui::Component FromLiveObject(std::shared_ptr<nlohmann::json> root, nlo
 }
 
 static ftxui::Component FromLiveArray(std::shared_ptr<nlohmann::json> root, nlohmann::json::json_pointer ptr,
-                                      const ftxui::Component &prefix, bool is_last, int depth, const Expander &expander) {
+                                      const ftxui::Component &prefix, bool is_last, int depth,
+                                      const Expander &expander) {
   class Impl : public ComponentExpandable {
   public:
-    Impl(std::shared_ptr<nlohmann::json> root, nlohmann::json::json_pointer ptr,
-         const ftxui::Component &prefix, bool is_last, int depth, const Expander &expander) : ComponentExpandable(expander) {
+    Impl(std::shared_ptr<nlohmann::json> root, nlohmann::json::json_pointer ptr, const ftxui::Component &prefix,
+         bool is_last, int depth, const Expander &expander)
+        : ComponentExpandable(expander) {
       Expanded() = (depth <= 0);
 
       const auto &json = root->at(ptr);
@@ -444,16 +457,14 @@ static ftxui::Component FromLiveKeyValue(std::shared_ptr<nlohmann::json> root, n
   std::string str = "\"" + key + "\"";
 
   if (value.is_object()) {
-    auto prefix = ftxui::Renderer([str] {
-      return ftxui::hbox({ftxui::text(str) | color(ftxui::Color::BlueLight), ftxui::text(": ")});
-    });
+    auto prefix = ftxui::Renderer(
+        [str] { return ftxui::hbox({ftxui::text(str) | color(ftxui::Color::BlueLight), ftxui::text(": ")}); });
     return FromLiveObject(root, ptr, prefix, is_last, depth, expander);
   }
 
   if (value.is_array()) {
-    auto prefix = ftxui::Renderer([str] {
-      return ftxui::hbox({ftxui::text(str) | color(ftxui::Color::BlueLight), ftxui::text(": ")});
-    });
+    auto prefix = ftxui::Renderer(
+        [str] { return ftxui::hbox({ftxui::text(str) | color(ftxui::Color::BlueLight), ftxui::text(": ")}); });
     return FromLiveArray(root, ptr, prefix, is_last, depth, expander);
   }
 
@@ -467,7 +478,8 @@ static ftxui::Component FromLiveKeyValue(std::shared_ptr<nlohmann::json> root, n
   });
 }
 
-ftxui::Component FromLive(std::shared_ptr<nlohmann::json> root, const nlohmann::json::json_pointer &ptr, bool is_last, int depth, const Expander &expander) {
+ftxui::Component FromLive(std::shared_ptr<nlohmann::json> root, const nlohmann::json::json_pointer &ptr, bool is_last,
+                          int depth, const Expander &expander) {
   const auto &json = root->at(ptr);
   if (json.is_object())
     return FromLiveObject(root, ptr, Empty(), is_last, depth, expander);

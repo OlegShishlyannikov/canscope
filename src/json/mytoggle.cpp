@@ -4,7 +4,8 @@
 namespace {
 class MyToggleImpl : public ftxui::ComponentBase {
 public:
-  MyToggleImpl(const char *label_on, const char *label_off, bool *state) : label_on_(label_on), label_off_(label_off), state_(state) {}
+  MyToggleImpl(const char *label_on, const char *label_off, bool *state)
+      : label_on_(label_on), label_off_(label_off), state_(state) {}
 
 private:
   // Component implementation.
@@ -43,4 +44,6 @@ private:
 };
 } // namespace
 
-ftxui::Component MyToggle(const char *label_on, const char *label_off, bool *state) { return ftxui::Make<MyToggleImpl>(label_on, label_off, state); }
+ftxui::Component MyToggle(const char *label_on, const char *label_off, bool *state) {
+  return ftxui::Make<MyToggleImpl>(label_on, label_off, state);
+}

@@ -7,8 +7,9 @@
 ftxui::Component MyButton(const char *prefix, const char *title, std::function<void()> on_click) {
   class Impl : public ftxui::ComponentBase {
   public:
-    Impl(const char *prefix, const char *title, std::function<void()> on_click) : on_click_(std::move(on_click)), prefix_(prefix), title_(title) {}
-    
+    Impl(const char *prefix, const char *title, std::function<void()> on_click)
+        : on_click_(std::move(on_click)), prefix_(prefix), title_(title) {}
+
     // Component implementation:
     ftxui::Element OnRender() override {
       auto style = Focused() ? (ftxui::Decorator(ftxui::inverted) | ftxui::focus) : ftxui::nothing;
@@ -17,7 +18,7 @@ ftxui::Component MyButton(const char *prefix, const char *title, std::function<v
           ftxui::text(title_) | style | ftxui::color(ftxui::Color::GrayDark) | ftxui::reflect(box_),
       });
     }
-    
+
     bool OnEvent(ftxui::Event event) override {
       if (event.is_mouse() && box_.Contain(event.mouse().x, event.mouse().y)) {
         if (!CaptureMouse(event))

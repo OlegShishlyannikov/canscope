@@ -22,7 +22,7 @@ TOOLCHAIN := cmake/toolchain-aarch64.cmake
 SSH_DIR ?= $(HOME)/.ssh
 CMAKE_COMMON := -DFETCHCONTENT_UPDATES_DISCONNECTED=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-SSH_PREP := set -euo pipefail; \
+SSH_PREP ?= set -euo pipefail; \
 	rm -rf /root/.ssh; \
 	mkdir -p /root/.ssh; \
 	cp -r /host_ssh/. /root/.ssh/; \

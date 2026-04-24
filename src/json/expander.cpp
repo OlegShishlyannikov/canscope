@@ -5,7 +5,8 @@
 ExpanderImpl::~ExpanderImpl() {
   // Remove this from parent:
   if (parent_) {
-    parent_->children_.erase(std::remove(parent_->children_.begin(), parent_->children_.end(), this), parent_->children_.end());
+    parent_->children_.erase(std::remove(parent_->children_.begin(), parent_->children_.end(), this),
+                             parent_->children_.end());
     parent_ = nullptr;
   }
 
