@@ -86,7 +86,7 @@ Run from the unpacked tarball without installing:
 
 System library requirements (dynamic build only):
   libboost-regex, libsqlite3, libicu, libzlib
-  This dynamic build was linked against ${OS_TAG:-the host's} system libs;
+  This dynamic build was linked against ${OS_TAG:-the build host} system libs;
   binary-compatible distros should work, but matching the build OS is safest.
     Debian/Ubuntu: apt install libboost-regex-dev libsqlite3-0 libicu-dev zlib1g
     Arch/Manjaro:  pacman -S boost icu sqlite3 zlib
