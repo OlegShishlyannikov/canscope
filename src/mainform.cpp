@@ -343,13 +343,13 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
                                                  (state.hovered ? ftxui::bold : ftxui::nothing);
 
                                 return ftxui::hbox({
-                                           ftxui::text(" Search: [ "),
-                                           state.element |
-                                               (state.hovered || state.focused ? ftxui::bgcolor(ftxui::Color::Grey11)
-                                                                               : ftxui::nothing) |
-                                               ftxui::xflex,
-                                           ftxui::text(" ]"),
-                                       });
+                                    ftxui::text(" Search: [ "),
+                                    state.element |
+                                        (state.hovered || state.focused ? ftxui::bgcolor(ftxui::Color::Grey11)
+                                                                        : ftxui::nothing) |
+                                        ftxui::xflex,
+                                    ftxui::text(" ]"),
+                                });
                               },
                               .multiline = false,
                           }),

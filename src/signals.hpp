@@ -19,19 +19,16 @@ class signals_map_s {
     virtual ~signal_holder_base() = default;
   };
 
-  template <typename Signature>
-  struct signal_holder : signal_holder_base {
+  template <typename Signature> struct signal_holder : signal_holder_base {
     boost::signals2::signal<Signature> signal;
   };
 
 public:
-  template <typename Signature>
-  void register_signal(const std::string &name) {
+  template <typename Signature> void register_signal(const std::string &name) {
     signals_.emplace(name, std::make_unique<signal_holder<Signature>>());
   }
 
-  template <typename Signature>
-  auto *get(const std::string &name) {
+  template <typename Signature> auto *get(const std::string &name) {
     auto it = signals_.find(name);
     if (it == signals_.end()) {
       throw std::runtime_error(fmt::format("Signal '{}' not found", name));
@@ -43,10 +40,7 @@ public:
     return &holder->signal;
   }
 
-  template <typename Signature>
-  auto *get(const char *name) {
-    return get<Signature>(std::string(name));
-  }
+  template <typename Signature> auto *get(const char *name) { return get<Signature>(std::string(name)); }
 
 private:
   std::unordered_map<std::string, std::unique_ptr<signal_holder_base>> signals_;
@@ -56,8 +50,10 @@ struct signals_s {
   static inline signals_map_s map = []() {
     signals_map_s m;
     m.register_signal<void(const std::string &)>("new_data_recvd");
-    m.register_signal<void(const std::string &, const std::string &, const can_frame_data_s &, const can_frame_diff_s &)>("new_entry");
+    m.register_signal<void(const std::string &, const std::string &, const can_frame_data_s &,
+                           const can_frame_diff_s &)>("new_entry");
     m.register_signal<void(const std::vector<can_frame_update_s> &)>("new_entries_batch");
+    m.register_signal<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame");
     m.register_signal<void(const std::string &)>("show_settings");
     m.register_signal<void()>("show_file_dialog_request");
     m.register_signal<void(const std::string &)>("export_file_request");

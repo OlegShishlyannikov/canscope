@@ -41,6 +41,7 @@ std::unique_ptr<sqlite::database> parseXlsx(const std::string &file) {
   for (const auto &col : ws.columns()) {
     if (auto [cell, value] = std::pair{col[0], col[0].to_string()}; !value.empty()) {
       auto col_idx = cell.column_index();
+
       if (auto it = pgn_mapping.find(value); it != pgn_mapping.end() && col_idx == std::get<0u>(it->second)) {
         pgn_col_to_db[col_idx] = std::string(std::get<1u>(it->second));
       } else if (auto it2 = spn_mapping.find(value); it2 != spn_mapping.end() && col_idx == std::get<0u>(it2->second)) {
@@ -60,7 +61,10 @@ std::unique_ptr<sqlite::database> parseXlsx(const std::string &file) {
       if (cell.row() != 1u) {
         auto col_idx = cell.column_index();
         auto value = cell.to_string();
-        if (value.empty()) continue;
+
+        if (value.empty()) {
+          continue;
+        }
 
         if (auto it = pgn_col_to_db.find(col_idx); it != pgn_col_to_db.end()) {
           pgn_row_map[it->second] = std::move(value);
@@ -76,6 +80,5 @@ std::unique_ptr<sqlite::database> parseXlsx(const std::string &file) {
   }
 
   db << "COMMIT";
-
   return db_ptr;
 }

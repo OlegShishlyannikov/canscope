@@ -89,13 +89,17 @@ std::unique_ptr<sqlite::database> parseCsv(const std::string &file) {
 
   std::string line;
   while (std::getline(ifs, line)) {
-    if (line.empty())
+    if (line.empty()) {
       continue;
+    }
 
     while (std::count(line.begin(), line.end(), '"') % 2 != 0) {
       std::string next;
-      if (!std::getline(ifs, next))
+
+      if (!std::getline(ifs, next)) {
         break;
+      }
+
       line += '\n';
       line += next;
     }
@@ -104,8 +108,9 @@ std::unique_ptr<sqlite::database> parseCsv(const std::string &file) {
     std::map<std::string, std::string> pgn_row_map, spn_row_map;
 
     for (size_t i = 0; i < fields.size(); ++i) {
-      if (fields[i].empty())
+      if (fields[i].empty()) {
         continue;
+      }
 
       if (auto it = pgn_col_to_db.find(i); it != pgn_col_to_db.end()) {
         pgn_row_map[it->second] = std::move(fields[i]);
@@ -120,6 +125,5 @@ std::unique_ptr<sqlite::database> parseCsv(const std::string &file) {
   }
 
   db << "COMMIT";
-
   return db_ptr;
 }

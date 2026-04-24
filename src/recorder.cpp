@@ -1,51 +1,80 @@
 #include "recorder.hpp"
-#include "sqlite_modern_cpp.h"
+
+#include <chrono>
+#include <thread>
+#include <utility>
 
 #include <zlib.h>
-#include <sys/resource.h>
 
 #define FMT_HEADER_ONLY
 #include <fmt/format.h>
 
+extern std::pair<nlohmann::json, nlohmann::json> processFrame(
+    sqlite::database &db, const std::string &iface, const std::string &canid,
+    const std::vector<uint8_t> &data);
+
 Recorder::Recorder(const std::string &db_path, bool console_output)
-    : disk_db_path_(db_path), console_output_(console_output) {
-  flush_task_ = std::async(std::launch::async, [this](std::stop_token st) { background_flush_task(st); }, flush_stop_.get_token());
-  if (console_output_) fmt::println("Recording to: {}", db_path);
+    : m_db_path_(db_path), m_console_output_(console_output), m_queue_(kQueueCapacity) {
+  m_disk_db_ = std::make_unique<sqlite::database>(m_db_path_);
+  *m_disk_db_ << "PRAGMA journal_mode = WAL;";
+  *m_disk_db_ << "PRAGMA synchronous = NORMAL;";
+  *m_disk_db_ << R"(
+    CREATE TABLE IF NOT EXISTS frames (
+      id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts_ms INTEGER NOT NULL,
+      iface TEXT    NOT NULL,
+      canid TEXT    NOT NULL,
+      pgn   INTEGER,
+      spns  BLOB
+    );
+  )";
+  *m_disk_db_ << "CREATE INDEX IF NOT EXISTS idx_frames_ts    ON frames(ts_ms);";
+  *m_disk_db_ << "CREATE INDEX IF NOT EXISTS idx_frames_canid ON frames(canid, ts_ms);";
+  *m_disk_db_ << "CREATE INDEX IF NOT EXISTS idx_frames_pgn   ON frames(pgn,   ts_ms) WHERE pgn IS NOT NULL;";
+
+  m_last_flush_ms_ = epoch_ms();
+  m_thread_ = std::async(std::launch::async, [this](std::stop_token st) { decoderLoop(st); }, m_stop_.get_token());
+
+  if (m_console_output_) fmt::println("Recording to: {}", m_db_path_);
 }
 
 Recorder::~Recorder() {
   flushAndClose();
 }
 
-void Recorder::onBatch(const std::vector<can_frame_update_s> &batch) {
-  int64_t now = epoch_ms();
-  std::lock_guard<std::mutex> lock(batch_mtx_);
-  if (batch_ts_start_ == 0) batch_ts_start_ = now;
-  for (const auto &u : batch) {
-    if (u.verbose && !u.verbose->is_null() && u.verbose->contains("SPNs")) {
-      pending_.push_back({now, u.iface, u.canid, u.verbose});
-    }
+void Recorder::pushFrame(std::shared_ptr<const raw_frame_s> frame) {
+  if (!m_queue_.push(std::move(frame))) {
+    m_dropped_.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
-void Recorder::flushAndClose() {
-  flush_stop_.request_stop();
-  if (flush_task_.valid()) flush_task_.wait();
+void Recorder::setJ1939Db(sqlite::database *db) {
+  m_j1939_db_.store(db, std::memory_order_release);
+}
 
-  std::lock_guard<std::mutex> lock(batch_mtx_);
-  if (!pending_.empty()) {
-    compress_batch();
+void Recorder::flushAndClose() {
+  if (!m_thread_.valid()) return;
+
+  m_stop_.request_stop();
+  m_thread_.wait();
+  m_thread_ = {};
+
+  if (!m_pending_.empty()) {
+    flushPending();
   }
+
+  if (m_console_output_) {
+    uint64_t dropped = m_dropped_.load(std::memory_order_relaxed);
+    if (dropped > 0) {
+      fmt::println("Recorder: dropped {} frames due to queue overflow", dropped);
+    }
+  }
+
+  m_disk_db_.reset();
 }
 
 int64_t Recorder::epoch_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-}
-
-size_t Recorder::get_rss_mb() {
-  struct rusage ru {};
-  getrusage(RUSAGE_SELF, &ru);
-  return static_cast<size_t>(ru.ru_maxrss) / 1024;
 }
 
 std::vector<uint8_t> Recorder::gzip_compress(const std::string &src) {
@@ -68,88 +97,119 @@ std::vector<uint8_t> Recorder::gzip_compress(const std::string &src) {
   return out;
 }
 
-void Recorder::compress_batch() {
-  if (pending_.empty()) return;
+void Recorder::decodeOne(const raw_frame_s &raw) {
+  frame_sample_s sample;
+  sample.ts_ms = raw.ts_ms;
+  sample.iface = raw.iface;
+  sample.canid = raw.canid;
 
-  nlohmann::json::array_t arr;
-  arr.reserve(pending_.size());
+  auto *db = m_j1939_db_.load(std::memory_order_acquire);
+  if (db) {
+    std::lock_guard<std::mutex> lock(g_j1939_db_mtx);
+    auto [verbose, brief] = processFrame(*db, raw.iface, raw.canid, raw.payload);
 
-  int64_t ts_start = pending_.front().ts_ms;
-  int64_t ts_end = pending_.back().ts_ms;
-
-  for (const auto &rec : pending_) {
-    nlohmann::json entry;
-    entry["ts"] = rec.ts_ms;
-    entry["canid"] = rec.canid;
-
-    if (rec.verbose && !rec.verbose->is_null()) {
-      const auto &v = *rec.verbose;
-      if (v.contains("PGN")) entry["pgn"] = v["PGN"];
-
-      if (v.contains("SPNs")) {
-        nlohmann::json::array_t spns;
-        for (const auto &spn : v["SPNs"]) {
-          nlohmann::json s;
-          if (spn.contains("SPN (integer)")) s["spn"] = spn["SPN (integer)"];
-          if (spn.contains("SPN name")) s["name"] = spn["SPN name"];
-          if (spn.contains("Value")) s["value"] = spn["Value"];
-          if (spn.contains("Unit")) s["unit"] = spn["Unit"];
-          spns.push_back(std::move(s));
+    if (!verbose.is_null()) {
+      if (verbose.contains("PGN")) {
+        const auto &pgn = verbose["PGN"];
+        if (pgn.is_number_integer()) sample.pgn = pgn.get<int64_t>();
+      }
+      if (verbose.contains("SPNs") && verbose["SPNs"].is_array()) {
+        for (const auto &spn : verbose["SPNs"]) {
+          spn_sample_s s;
+          s.ts_ms = raw.ts_ms;
+          if (spn.contains("SPN (integer)") && spn["SPN (integer)"].is_number_integer()) {
+            s.spn = spn["SPN (integer)"].get<int64_t>();
+          }
+          if (spn.contains("SPN name") && spn["SPN name"].is_string()) {
+            s.name = spn["SPN name"].get<std::string>();
+          }
+          if (spn.contains("Value")) s.value = spn["Value"];
+          if (spn.contains("Unit") && spn["Unit"].is_string()) {
+            s.unit = spn["Unit"].get<std::string>();
+          }
+          sample.spns.push_back(std::move(s));
         }
-        entry["spns"] = std::move(spns);
       }
     }
-
-    arr.push_back(std::move(entry));
   }
 
-  std::string json_str = nlohmann::json(arr).dump();
-  auto compressed = gzip_compress(json_str);
-
-  try {
-    sqlite::database disk_db(disk_db_path_);
-    disk_db << "PRAGMA journal_mode = WAL;";
-    disk_db << R"(
-      CREATE TABLE IF NOT EXISTS batches (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts_start    INTEGER NOT NULL,
-        ts_end      INTEGER NOT NULL,
-        frame_count INTEGER NOT NULL,
-        data        BLOB    NOT NULL
-      );
-    )";
-    disk_db << R"(CREATE INDEX IF NOT EXISTS idx_batches_ts ON batches(ts_start);)";
-
-    disk_db << "INSERT INTO batches (ts_start, ts_end, frame_count, data) VALUES (?, ?, ?, ?);"
-            << ts_start << ts_end << static_cast<int64_t>(pending_.size()) << compressed;
-
-    if (console_output_) {
-      fmt::println("Flushed batch: {} frames, {:.1f}KB -> {:.1f}KB gzip ({:.0f}% compression)",
-                   pending_.size(),
-                   static_cast<double>(json_str.size()) / 1024.0,
-                   static_cast<double>(compressed.size()) / 1024.0,
-                   (1.0 - static_cast<double>(compressed.size()) / static_cast<double>(json_str.size())) * 100.0);
-    }
-  } catch (const sqlite::sqlite_exception &) {
-  }
-
-  pending_.clear();
-  batch_ts_start_ = 0;
+  m_pending_.push_back(std::move(sample));
 }
 
-void Recorder::background_flush_task(std::stop_token st) {
-  while (!st.stop_requested()) {
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+void Recorder::flushPending() {
+  if (m_pending_.empty()) return;
 
-    std::lock_guard<std::mutex> lock(batch_mtx_);
-    if (pending_.empty()) continue;
+  try {
+    *m_disk_db_ << "BEGIN;";
+    for (const auto &f : m_pending_) {
+      std::vector<uint8_t> blob;
+      if (!f.spns.empty()) {
+        nlohmann::json::array_t arr;
+        arr.reserve(f.spns.size());
+        for (const auto &s : f.spns) {
+          nlohmann::json j;
+          j["ts_ms"] = s.ts_ms;
+          j["spn"] = s.spn;
+          if (!s.name.empty()) j["name"] = s.name;
+          if (!s.value.is_null()) j["value"] = s.value;
+          if (!s.unit.empty()) j["unit"] = s.unit;
+          arr.push_back(std::move(j));
+        }
+        blob = gzip_compress(nlohmann::json(arr).dump());
+      }
+
+      if (f.pgn.has_value() && !blob.empty()) {
+        *m_disk_db_ << "INSERT INTO frames (ts_ms, iface, canid, pgn, spns) VALUES (?, ?, ?, ?, ?);"
+                    << f.ts_ms << f.iface << f.canid << *f.pgn << blob;
+      } else if (f.pgn.has_value()) {
+        *m_disk_db_ << "INSERT INTO frames (ts_ms, iface, canid, pgn, spns) VALUES (?, ?, ?, ?, NULL);"
+                    << f.ts_ms << f.iface << f.canid << *f.pgn;
+      } else if (!blob.empty()) {
+        *m_disk_db_ << "INSERT INTO frames (ts_ms, iface, canid, pgn, spns) VALUES (?, ?, ?, NULL, ?);"
+                    << f.ts_ms << f.iface << f.canid << blob;
+      } else {
+        *m_disk_db_ << "INSERT INTO frames (ts_ms, iface, canid, pgn, spns) VALUES (?, ?, ?, NULL, NULL);"
+                    << f.ts_ms << f.iface << f.canid;
+      }
+    }
+    *m_disk_db_ << "COMMIT;";
+
+    if (m_console_output_) {
+      fmt::println("Flushed {} frames", m_pending_.size());
+    }
+  } catch (const sqlite::sqlite_exception &e) {
+    try { *m_disk_db_ << "ROLLBACK;"; } catch (...) {}
+    if (m_console_output_) {
+      fmt::println("Recorder flush failed: {}", e.what());
+    }
+  }
+
+  m_pending_.clear();
+}
+
+void Recorder::decoderLoop(std::stop_token st) {
+  while (!st.stop_requested()) {
+    std::shared_ptr<const raw_frame_s> frame;
+    size_t drained = 0;
+    while (drained < 1024 && m_queue_.pop(frame)) {
+      decodeOne(*frame);
+      ++drained;
+    }
 
     int64_t now = epoch_ms();
-    bool time_trigger = (now - batch_ts_start_) >= 60'000;
-    bool mem_trigger = get_rss_mb() >= 500;
-
-    if (time_trigger || mem_trigger) {
-      compress_batch();
+    if (now - m_last_flush_ms_ >= kFlushIntervalMs && !m_pending_.empty()) {
+      flushPending();
+      m_last_flush_ms_ = now;
     }
+
+    if (drained == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+
+  // Drain remaining frames on shutdown
+  std::shared_ptr<const raw_frame_s> frame;
+  while (m_queue_.pop(frame)) {
+    decodeOne(*frame);
   }
 }

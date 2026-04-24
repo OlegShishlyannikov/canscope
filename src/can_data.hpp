@@ -36,5 +36,12 @@ struct can_frame_update_s {
   std::shared_ptr<nlohmann::json> brief;
 };
 
+struct raw_frame_s {
+  int64_t ts_ms = 0;
+  std::string iface;
+  std::string canid;
+  std::vector<uint8_t> payload;
+};
+
 // Convert verbose processFrame JSON to export format for a single CAN ID
 nlohmann::json verboseToExportJson(const nlohmann::json &verbose);

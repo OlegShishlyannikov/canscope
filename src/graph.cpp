@@ -1,5 +1,4 @@
 #include "tuple.hpp"
-#include <functional>
 #include <boost/convert.hpp>
 #include <boost/convert/stream.hpp>
 #include <boost/functional/hash.hpp>
@@ -8,6 +7,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <functional>
 
 #include <condition_variable>
 #include <filesystem>
@@ -29,7 +29,8 @@
 
 class GraphId_ {
 public:
-  GraphId_(const std::string &name, const std::string &uuid = generateUUID_()) : m_hash_(std::hash<std::string>()(uuid)), m_name_(name) {}
+  GraphId_(const std::string &name, const std::string &uuid = generateUUID_())
+      : m_hash_(std::hash<std::string>()(uuid)), m_name_(name) {}
   ~GraphId_() = default;
 
   bool operator==(const GraphId_ &other) const { return m_hash_ == other.hash(); }
@@ -47,9 +48,11 @@ template <> struct std::hash<GraphId_> {
   std::size_t operator()(const GraphId_ &g) const noexcept { return g.hash(); }
 };
 
-ftxui::Component makeGraph(const std::string &canid, const struct spn_settings_s &settings, std::function<std::vector<uint8_t>()> data_fn, ftxui::ScreenInteractive *screen,
+ftxui::Component makeGraph(const std::string &canid, const struct spn_settings_s &settings,
+                           std::function<std::vector<uint8_t>()> data_fn, ftxui::ScreenInteractive *screen,
                            signals_map_t &smap) {
-  static const auto json_array_to_payload = [](const nlohmann::json &settings, const std::vector<std::string> &strvec_bytes) {
+  static const auto json_array_to_payload = [](const nlohmann::json &settings,
+                                               const std::vector<std::string> &strvec_bytes) {
     std::vector<uint8_t> res;
 
     if (settings.contains("size") && settings.contains("pos") && settings.contains("le")) {
@@ -122,12 +125,14 @@ ftxui::Component makeGraph(const std::string &canid, const struct spn_settings_s
 
             [&](const auto &e) {
               current_setting = std::get<0u>(e);
-              settings_json[std::get<0u>(e)] = boost::lexical_cast<std::remove_cvref_t<decltype(*std::get<2u>(e))>>(*std::get<1u>(e));
+              settings_json[std::get<0u>(e)] =
+                  boost::lexical_cast<std::remove_cvref_t<decltype(*std::get<2u>(e))>>(*std::get<1u>(e));
             });
 
         current_setting.clear();
 
-        std::vector<std::string> v = json["data"].is_array() ? json["data"].template get<std::vector<std::string>>() : std::vector<std::string>{};
+        std::vector<std::string> v = json["data"].is_array() ? json["data"].template get<std::vector<std::string>>()
+                                                             : std::vector<std::string>{};
         std::vector<uint8_t> bytes = json_array_to_payload(settings_json, v);
 
         json["payload_bytes"] = [&]() {
@@ -146,7 +151,8 @@ ftxui::Component makeGraph(const std::string &canid, const struct spn_settings_s
         }
 
         if (settings_json["x"].get<double>() / settings_json["y"].get<double>() != NAN) {
-          spn_val = static_cast<double>(integer) * settings_json["x"].get<double>() / settings_json["y"].get<double>() + settings_json["offset"].get<double>();
+          spn_val = static_cast<double>(integer) * settings_json["x"].get<double>() / settings_json["y"].get<double>() +
+                    settings_json["offset"].get<double>();
         }
 
         json["spn_value"] = spn_val;
@@ -161,21 +167,25 @@ ftxui::Component makeGraph(const std::string &canid, const struct spn_settings_s
 
   class Impl : public ftxui::ComponentBase {
   public:
-    explicit Impl(const std::string &canid, const struct spn_settings_s &settings, std::function<std::vector<uint8_t>()> data_fn, ftxui::ScreenInteractive *screen, signals_map_t &smap)
+    explicit Impl(const std::string &canid, const struct spn_settings_s &settings,
+                  std::function<std::vector<uint8_t>()> data_fn, ftxui::ScreenInteractive *screen, signals_map_t &smap)
         : m_settings_(settings), m_data_fn_(std::move(data_fn)) {
 
       auto renderer = ftxui::Renderer([this]() {
         auto data = m_data_fn_();
         auto json = create_json(data, m_settings_);
         return ftxui::vbox({
-            ftxui::text(fmt::format("Raw data: {}", json["data"].dump())) | ftxui::color(ftxui::Color::Cyan) | ftxui::hcenter,
-            ftxui::text(fmt::format("CRC: {}", json["crc"].dump())) | ftxui::color(ftxui::Color::Cyan) | ftxui::hcenter,
-            ftxui::text(fmt::format("Payload: {}", json.contains("payload_bytes") ? json["payload_bytes"].dump() : "[]")) | ftxui::color(ftxui::Color::Cyan) |
+            ftxui::text(fmt::format("Raw data: {}", json["data"].dump())) | ftxui::color(ftxui::Color::Cyan) |
                 ftxui::hcenter,
+            ftxui::text(fmt::format("CRC: {}", json["crc"].dump())) | ftxui::color(ftxui::Color::Cyan) | ftxui::hcenter,
+            ftxui::text(
+                fmt::format("Payload: {}", json.contains("payload_bytes") ? json["payload_bytes"].dump() : "[]")) |
+                ftxui::color(ftxui::Color::Cyan) | ftxui::hcenter,
 
             ftxui::hbox({
                 ftxui::text("Value: ") | ftxui::bold,
-                ftxui::text(fmt::format("{:.6g}", json.contains("tag_value") ? json["tag_value"].template get<double>() : 0.0f)) |
+                ftxui::text(fmt::format("{:.6g}",
+                                        json.contains("tag_value") ? json["tag_value"].template get<double>() : 0.0f)) |
                     ftxui::color(ftxui::Color::IndianRed),
             }) | ftxui::hcenter,
         });

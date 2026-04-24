@@ -36,7 +36,6 @@
 
 #include "signals.hpp"
 #include "sqlite_modern_cpp.h"
-#include "utils.hpp"
 #include "json/expander.hpp"
 #include "json/json.hpp"
 

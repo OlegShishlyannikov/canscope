@@ -2,8 +2,11 @@
 #include <boost/signals2.hpp>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <future>
 #include <map>
 #include <memory>
@@ -28,10 +31,10 @@
 #include <boost/spirit/include/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
 
+#include "discoverer.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
-#include "discoverer.hpp"
 #include "headless_streamer.hpp"
 #include "process.hpp"
 #include "recorder.hpp"
@@ -42,6 +45,7 @@ std::mutex g_j1939_db_mtx;
 std::atomic<uint64_t> g_error_frame_count{0};
 
 int32_t main(int32_t argc, char *argv[]) {
+
   static auto screen = ftxui::ScreenInteractive::Fullscreen();
   static std::mutex rw_mtx;
   static std::map<std::string, std::map<std::string, std::shared_ptr<can_frame_data_s>>> aggregated;
@@ -72,77 +76,79 @@ int32_t main(int32_t argc, char *argv[]) {
       fmt::print("{}\r\n", (std::stringstream{} << man).str());
     };
 
-    auto cli = (
-
-        clipp::option("-dscvr, --discovery-mode")
-            .doc("Discover mode: output PGN/SPN structure (only first received falue) to stdout or file")
-            .call([&]() {
-              mode = Mode::discover;
-              ++mode_flag_count;
-            }),
-
-        clipp::option("-hl", "--headless")
-            .doc("Headless mode: stream all decoded PGN/SPN values to stdout")
-            .call([&]() {
-              mode = Mode::headless;
-              ++mode_flag_count;
-            }),
-
-        clipp::option("-rec", "--record")
-            .doc("Record mode: write all decoded PGN/SPN values + timestamps to SQLite DB")
-            .call([&]() {
-              mode = Mode::record;
-              ++mode_flag_count;
-            }),
-
-        clipp::option("-of", "--output-file") &
-            clipp::value("Output file", cli_opts.output_file).doc("Output file path (used with -discover)"),
-
-        clipp::option("-db", "--database") & clipp::value("SQLite output database path", cli_opts.record_db_path)
-                                                 .doc("SQLite database path (used with -rec)"),
-
-        (clipp::option("-play", "--playback-mode")
+    auto cli =
+        (clipp::option("-dscvr, --discovery-mode")
+             .doc("Discover mode: output PGN/SPN structure (only first received falue) to stdout or file")
              .call([&]() {
-               mode = Mode::play;
+               mode = Mode::discover;
                ++mode_flag_count;
-             })
-             .doc("Play mode: send synthetic CAN frames per YAML config. "
-                  "Optional path; defaults to /etc/canscope/playback.yaml. Exclusive with other modes.") &
-         clipp::opt_value("Playback YAML config", cli_opts.play_config_path)),
+             }),
 
-        clipp::option("-e", "--execute-command") &
-            clipp::value("command", cli_opts.command).call([&]() {}).doc("execute cli command to read its output"),
-
-        (clipp::option("-j1939-xlsx") &
-         clipp::value("J1939 XLSX file", cli_opts.xlsx_file)
+         clipp::option("-hl", "--headless")
+             .doc("Headless mode: stream all decoded PGN/SPN values to stdout")
              .call([&]() {
-               j1939_parser_task = std::async(std::launch::async, [&]() {
-                 j1939_db_owner = parseXlsx(cli_opts.xlsx_file);
-                 j1939_db.store(j1939_db_owner.get());
-                 signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
-               });
-             })
-             .doc("J1939 Digital Annex .xlsx file")) |
+               mode = Mode::headless;
+               ++mode_flag_count;
+             }),
 
-            (clipp::option("-j1939-csv") &
-             clipp::value("J1939 CSV file", cli_opts.csv_file)
-                 .call([&]() {
-                   j1939_parser_task = std::async(std::launch::async, [&]() {
-                     j1939_db_owner = parseCsv(cli_opts.csv_file);
-                     j1939_db.store(j1939_db_owner.get());
-                     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
-                   });
-                 })
-                 .doc("J1939 Digital Annex .csv file")));
+         clipp::option("-rec", "--record")
+             .doc("Record mode: write all decoded PGN/SPN values + timestamps to SQLite DB")
+             .call([&]() {
+               mode = Mode::record;
+               ++mode_flag_count;
+             }),
 
-    auto man = clipp::make_man_page(cli, argv[0]);
-    auto cli_with_help = (cli | clipp::option("-h", "--help").set(cli_opts.show_help).doc("show this help").call([&]() {
-      print_usage(man);
-    }));
+         clipp::option("-of", "--output-file") &
+             clipp::value("Output file", cli_opts.output_file).doc("Output file path (used with -discover)"),
+
+         clipp::option("-db", "--database") & clipp::value("SQLite output database path", cli_opts.record_db_path)
+                                                  .doc("SQLite database path (used with -rec)"),
+
+         (clipp::option("-play", "--playback-mode")
+              .call([&]() {
+                mode = Mode::play;
+                ++mode_flag_count;
+              })
+              .doc("Play mode: send synthetic CAN frames per YAML config. "
+                   "Optional path; defaults to /etc/canscope/playback.yaml. Exclusive with other modes.") &
+          clipp::opt_value("Playback YAML config", cli_opts.play_config_path)),
+
+         clipp::option("-e", "--execute-command") &
+             clipp::value("command", cli_opts.command).call([&]() {}).doc("execute cli command to read its output"),
+
+         (clipp::option("-j1939-xlsx") &
+          clipp::value("J1939 XLSX file", cli_opts.xlsx_file)
+              .call([&]() {
+                j1939_parser_task = std::async(std::launch::async, [&]() {
+                  j1939_db_owner = parseXlsx(cli_opts.xlsx_file);
+                  j1939_db.store(j1939_db_owner.get());
+                  signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
+                });
+              })
+              .doc("J1939 Digital Annex .xlsx file")) |
+
+             (clipp::option("-j1939-csv") &
+              clipp::value("J1939 CSV file", cli_opts.csv_file)
+                  .call([&]() {
+                    j1939_parser_task = std::async(std::launch::async, [&]() {
+                      j1939_db_owner = parseCsv(cli_opts.csv_file);
+                      j1939_db.store(j1939_db_owner.get());
+                      signals.map.get<void(sqlite::database &)>("j1939_database_ready")->operator()(*j1939_db_owner);
+                    });
+                  })
+                  .doc("J1939 Digital Annex .csv file")));
+
+    auto cli_with_help = (cli | clipp::option("-h", "--help").set(cli_opts.show_help).doc("show this help"));
+    auto man = clipp::make_man_page(cli_with_help, argv[0]);
 
     if (!clipp::parse(argc, argv, cli_with_help)) {
       print_usage(man);
       return -1;
+    }
+
+    if (cli_opts.show_help) {
+      print_usage(man);
+      return 0;
     }
 
     if (mode == Mode::record && cli_opts.record_db_path.empty()) {
@@ -174,8 +180,62 @@ int32_t main(int32_t argc, char *argv[]) {
       return;
     }
 
+    int64_t ts_ms = 0;
+    std::string_view rest = line;
+
+    while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) {
+      rest.remove_prefix(1);
+    }
+
+    if (!rest.empty() && rest.front() == '(') {
+      auto close = rest.find(')');
+
+      if (close != std::string_view::npos) {
+        std::string inner(rest.substr(1, close - 1));
+        rest.remove_prefix(close + 1);
+
+        while (!rest.empty() && rest.front() == ' ') {
+          rest.remove_prefix(1);
+        }
+
+        char *end = nullptr;
+        double ts_s = std::strtod(inner.c_str(), &end);
+
+        if (end == inner.c_str() + inner.size() && ts_s > 1e9) {
+          ts_ms = static_cast<int64_t>(ts_s * 1000.0);
+        } else {
+          int Y = 0, Mo = 0, D = 0, H = 0, Mi = 0;
+          double S = 0.f;
+
+          if (std::sscanf(inner.c_str(), "%d-%d-%d %d:%d:%lf", &Y, &Mo, &D, &H, &Mi, &S) == 6) {
+            std::tm tm{
+                .tm_year = Y - 1900,
+                .tm_mon = Mo - 1,
+                .tm_mday = D,
+                .tm_hour = H,
+                .tm_min = Mi,
+                .tm_sec = static_cast<int>(S),
+                .tm_isdst = -1,
+            };
+
+            std::time_t t = std::mktime(&tm);
+
+            if (t != -1) {
+              double frac = S - static_cast<int64_t>(S);
+              ts_ms = static_cast<int64_t>(t) * 1000 + static_cast<int64_t>(frac * 1000.f);
+            }
+          }
+        }
+      }
+    }
+
+    if (ts_ms == 0) {
+      ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                  .count();
+    }
+
     std::vector<std::string_view> words;
-    for (auto part : std::string_view(line) | std::views::split(' ')) {
+    for (auto part : rest | std::views::split(' ')) {
       if (!part.empty()) {
         words.emplace_back(part.begin(), part.end());
       }
@@ -245,6 +305,7 @@ int32_t main(int32_t argc, char *argv[]) {
         uint8_t byte = 0;
         auto *first = words[i].data();
         auto *last = first + words[i].size();
+
         if (auto [ptr, ec] = std::from_chars(first, last, byte, 16 /* HEX format */);
             ec != std::errc{} || ptr != last) {
           return;
@@ -258,10 +319,19 @@ int32_t main(int32_t argc, char *argv[]) {
         return;
       }
 
+      auto raw = std::make_shared<raw_frame_s>(raw_frame_s{
+          .ts_ms = ts_ms,
+          .iface = std::string(iface),
+          .canid = std::string(canid),
+          .payload = entry.payload,
+      });
+
       {
         std::lock_guard<std::mutex> lock(rw_mtx);
-        aggregated[std::string(iface)][std::string(canid)] = std::make_shared<can_frame_data_s>(std::move(entry));
+        aggregated[raw->iface][raw->canid] = std::make_shared<can_frame_data_s>(std::move(entry));
       }
+
+      signals_s::map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")->operator()(raw);
     }
   };
 
@@ -278,162 +348,179 @@ int32_t main(int32_t argc, char *argv[]) {
   std::future<void> aggregator_task;
   if (needs_input) {
     aggregator_task = std::async(
-      std::launch::async,
-      [command = cli_opts.command](std::stop_token stop_token) {
-        if (command.empty()) {
+        std::launch::async,
+        [command = cli_opts.command](std::stop_token stop_token) {
+          if (command.empty()) {
 
-          // Read from the saved pipe fd using epoll to avoid blocking on stop
-          int epfd = ::epoll_create1(0);
-          if (epfd < 0)
-            return;
-
-          struct epoll_event ev = {.events = EPOLLIN, .data = {.fd = candump_fd}};
-          ::epoll_ctl(epfd, EPOLL_CTL_ADD, candump_fd, &ev);
-
-          FILE *pipe_stream = ::fdopen(candump_fd, "r");
-          if (!pipe_stream) {
-            ::close(epfd);
-            return;
-          }
-
-          struct epoll_event events[1];
-          char buf[4096];
-
-          while (!stop_token.stop_requested()) {
-            int32_t nfds = ::epoll_wait(epfd, events, 1, 50);
-            if (nfds > 0 && !stop_token.stop_requested()) {
-              if (events[0].events & EPOLLIN) {
-                if (!std::fgets(buf, sizeof(buf), pipe_stream)) {
-                  break;
-                }
-
-                std::string line(buf);
-
-                if (!line.empty() && line.back() == '\n') {
-                  line.pop_back();
-                }
-
-                parse_candump_line(line);
-              }
-
-              if (events[0].events & (EPOLLHUP | EPOLLERR)) {
-                break;
-              }
+            // Read from the saved pipe fd using epoll to avoid blocking on stop
+            int epfd = ::epoll_create1(0);
+            if (epfd < 0) {
+              return;
             }
-          }
 
-          std::fclose(pipe_stream);
-          ::close(epfd);
-        } else {
-          // Launch subprocess
-          TinyProcessLib::Config cfg = {
-              .buffer_size = PIPE_BUF, .inherit_file_descriptors = true, .on_stdout_close = []() {}};
-          p = new TinyProcessLib::Process(
-              command, "",
-              [stop_token](const char *bytes, size_t n) {
-                if (n > PIPE_BUF || stop_token.stop_requested())
-                  return;
+            struct epoll_event ev = {
+                .events = EPOLLIN,
+                .data = {.fd = candump_fd},
+            };
 
-                std::string buf(bytes, n), line;
-                std::istringstream ss(buf);
-                while (std::getline(ss, line)) {
+            ::epoll_ctl(epfd, EPOLL_CTL_ADD, candump_fd, &ev);
+
+            FILE *pipe_stream = ::fdopen(candump_fd, "r");
+            if (!pipe_stream) {
+              ::close(epfd);
+              return;
+            }
+
+            struct epoll_event events[1];
+            char buf[4096];
+
+            while (!stop_token.stop_requested()) {
+              int32_t nfds = ::epoll_wait(epfd, events, 1, 50);
+              if (nfds > 0 && !stop_token.stop_requested()) {
+                if (events[0].events & EPOLLIN) {
+                  if (!std::fgets(buf, sizeof(buf), pipe_stream)) {
+                    break;
+                  }
+
+                  std::string line(buf);
+
+                  if (!line.empty() && line.back() == '\n') {
+                    line.pop_back();
+                  }
+
                   parse_candump_line(line);
                 }
-              },
-              [](const char *, size_t) {}, false, cfg);
 
-          while (true) {
-            if (stop_token.stop_requested()) {
-              if (p) {
-                p->kill();
-                ::kill(-p->get_id(), SIGKILL);
-                ::kill(p->get_id(), SIGKILL);
-                p->get_exit_status();
-                delete p;
-                p = nullptr;
+                if (events[0].events & (EPOLLHUP | EPOLLERR)) {
+                  break;
+                }
               }
-              break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-          }
-        }
-      },
 
-      aggregator_task_stop.get_token());
-  }  // if (needs_input)
+            std::fclose(pipe_stream);
+            ::close(epfd);
+          } else {
+            // Launch subprocess
+            TinyProcessLib::Config cfg = {
+                .buffer_size = PIPE_BUF,
+                .inherit_file_descriptors = true,
+                .on_stdout_close = []() {},
+            };
+
+            p = new TinyProcessLib::Process(
+                command, "",
+                [stop_token](const char *bytes, size_t n) {
+                  if (n > PIPE_BUF || stop_token.stop_requested()) {
+                    return;
+                  }
+
+                  std::string buf(bytes, n), line;
+                  std::istringstream ss(buf);
+
+                  while (std::getline(ss, line)) {
+                    parse_candump_line(line);
+                  }
+                },
+                [](const char *, size_t) {}, false, cfg);
+
+            while (true) {
+              if (stop_token.stop_requested()) {
+                if (p) {
+                  p->kill();
+                  ::kill(-p->get_id(), SIGKILL);
+                  ::kill(p->get_id(), SIGKILL);
+                  p->get_exit_status();
+                  delete p;
+                  p = nullptr;
+                }
+
+                break;
+              }
+
+              std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+          }
+        },
+
+        aggregator_task_stop.get_token());
+  } // if (needs_input)
 
   // UI refresh task: compares snapshots at ~30fps and emits signals for changed entries
   std::future<void> refresh_task;
   if (needs_input)
     refresh_task = std::async(
-      std::launch::async,
-      [](std::stop_token stop_token) {
-        using aggregated_t = std::map<std::string, std::map<std::string, std::shared_ptr<can_frame_data_s>>>;
-        aggregated_t old_data;
+        std::launch::async,
+        [](std::stop_token stop_token) {
+          using aggregated_t = std::map<std::string, std::map<std::string, std::shared_ptr<can_frame_data_s>>>;
+          aggregated_t old_data;
 
-        while (!stop_token.stop_requested()) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(33u));
+          while (!stop_token.stop_requested()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(33u));
 
-          aggregated_t current;
-          {
-            std::lock_guard<std::mutex> lock(rw_mtx);
-            current = aggregated;
-          }
+            aggregated_t current;
 
-          std::vector<can_frame_update_s> batch;
-
-          for (const auto &[iface, canids] : current) {
-            bool new_iface = !old_data.contains(iface);
-
-            for (const auto &[canid, ptr] : canids) {
-              if (!ptr)
-                continue;
-
-              can_frame_diff_s diff;
-              diff.is_new_interface = new_iface;
-              diff.is_new_canid = new_iface || !old_data[iface].contains(canid);
-
-              if (!diff.is_new_canid) {
-                const auto &old_ptr = old_data[iface][canid];
-                if (old_ptr == ptr)
-                  continue;
-
-                const auto &old_entry = *old_ptr;
-                diff.payload_changed.resize(ptr->payload.size(), false);
-
-                for (size_t i = 0; i < ptr->payload.size(); ++i) {
-                  diff.payload_changed[i] = (i >= old_entry.payload.size() || ptr->payload[i] != old_entry.payload[i]);
-                }
-              } else {
-                diff.payload_changed.assign(ptr->payload.size(), true);
-              }
-
-              std::shared_ptr<nlohmann::json> verbose, brief;
-              auto *db = j1939_db.load();
-              if (db) {
-                std::lock_guard<std::mutex> db_lock(g_j1939_db_mtx);
-                extern std::pair<nlohmann::json, nlohmann::json> processFrame(
-                    sqlite::database & db, const std::string &iface, const std::string &canid,
-                    const std::vector<uint8_t> &data);
-                auto [v, b] = processFrame(*db, iface, canid, ptr->payload);
-
-                verbose = std::make_shared<nlohmann::json>(std::move(v));
-                brief = std::make_shared<nlohmann::json>(std::move(b));
-              }
-
-              batch.push_back({iface, canid, *ptr, std::move(diff), std::move(verbose), std::move(brief)});
+            {
+              std::lock_guard<std::mutex> lock(rw_mtx);
+              current = aggregated;
             }
+
+            std::vector<can_frame_update_s> batch;
+
+            for (const auto &[iface, canids] : current) {
+              bool new_iface = !old_data.contains(iface);
+
+              for (const auto &[canid, ptr] : canids) {
+                if (!ptr) {
+                  continue;
+                }
+
+                can_frame_diff_s diff;
+                diff.is_new_interface = new_iface;
+                diff.is_new_canid = new_iface || !old_data[iface].contains(canid);
+
+                if (!diff.is_new_canid) {
+                  const auto &old_ptr = old_data[iface][canid];
+                  if (old_ptr == ptr) {
+                    continue;
+                  }
+
+                  const auto &old_entry = *old_ptr;
+                  diff.payload_changed.resize(ptr->payload.size(), false);
+
+                  for (size_t i = 0; i < ptr->payload.size(); ++i) {
+                    diff.payload_changed[i] =
+                        (i >= old_entry.payload.size() || ptr->payload[i] != old_entry.payload[i]);
+                  }
+                } else {
+                  diff.payload_changed.assign(ptr->payload.size(), true);
+                }
+
+                std::shared_ptr<nlohmann::json> verbose, brief;
+                auto *db = j1939_db.load();
+                if (db) {
+                  std::lock_guard<std::mutex> db_lock(g_j1939_db_mtx);
+                  extern std::pair<nlohmann::json, nlohmann::json> processFrame(
+                      sqlite::database & db, const std::string &iface, const std::string &canid,
+                      const std::vector<uint8_t> &data);
+                  auto [v, b] = processFrame(*db, iface, canid, ptr->payload);
+
+                  verbose = std::make_shared<nlohmann::json>(std::move(v));
+                  brief = std::make_shared<nlohmann::json>(std::move(b));
+                }
+
+                batch.push_back({iface, canid, *ptr, std::move(diff), std::move(verbose), std::move(brief)});
+              }
+            }
+
+            if (!batch.empty()) {
+              signals.map.get<void(const std::vector<can_frame_update_s> &)>("new_entries_batch")->operator()(batch);
+            }
+
+            old_data.swap(current);
           }
+        },
 
-          if (!batch.empty()) {
-            signals.map.get<void(const std::vector<can_frame_update_s> &)>("new_entries_batch")->operator()(batch);
-          }
-
-          old_data.swap(current);
-        }
-      },
-
-      refresh_task_stop.get_token());
+        refresh_task_stop.get_token());
 
   // Stop all tasks on SIGINT
   {
@@ -455,8 +542,11 @@ int32_t main(int32_t argc, char *argv[]) {
 
   if (mode == Mode::record) {
     recorder = std::make_unique<Recorder>(cli_opts.record_db_path, true);
-    signals.map.get<void(const std::vector<can_frame_update_s> &)>("new_entries_batch")
-        ->connect([](const std::vector<can_frame_update_s> &batch) { recorder->onBatch(batch); });
+    signals.map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")
+        ->connect([](const std::shared_ptr<const raw_frame_s> &frame) { recorder->pushFrame(frame); });
+    signals.map.get<void(sqlite::database &)>("j1939_database_ready")->connect([](sqlite::database &db) {
+      recorder->setJ1939Db(&db);
+    });
   }
 
   if (mode == Mode::discover) {
@@ -548,9 +638,20 @@ int32_t main(int32_t argc, char *argv[]) {
   // Cleanup grace period: once stop_sources have been requested (by SIGINT handler
   // or by TUI loop exit), give each task up to 3s to wind down before destruction.
   {
-    const char *names[] = {"xlsx_parser", "aggregator", "refresh", "headless"};
+    const char *names[] = {
+        "xlsx_parser",
+        "aggregator",
+        "refresh",
+        "headless",
+    };
+
     int idx = 0;
-    for (auto *task : {&j1939_parser_task, &aggregator_task, &refresh_task, &headless_task}) {
+    for (auto *task : {
+             &j1939_parser_task,
+             &aggregator_task,
+             &refresh_task,
+             &headless_task,
+         }) {
       if (task && task->valid()) {
         task->wait_for(std::chrono::seconds(3));
       }
@@ -567,7 +668,7 @@ int32_t main(int32_t argc, char *argv[]) {
   }
 
   if (playback_handle) {
-    playback_handle.reset();  // triggers Impl dtor -> stops sender tasks
+    playback_handle.reset(); // triggers Impl dtor -> stops sender tasks
   }
 
   return 0;

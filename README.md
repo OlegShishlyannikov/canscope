@@ -1,5 +1,7 @@
 # {canscope}
 
+*[Русская версия](README_ru.md)*
+
 CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` format, decodes them using a J1939 Digital Annex (xlsx or csv), and presents results in an interactive terminal UI or as JSON output.
 
 ![demo](canscope-demo.gif)
@@ -12,7 +14,7 @@ CAN bus sniffer and SAE J1939 protocol analyzer. Reads CAN frames in `candump` f
 - **Headless mode** - newline-delimeted JSON output to stdout, for scripting and automation
 - **Discover mode** — probe a live bus for one pass, emit a JSON tree of every PGN seen with its full SPN breakdown (positions, resolutions, units, ranges). Useful for reverse-engineering or building configuration
   files without running the TUI. Writes to stdout (newline-delimeted JSON) or `-of <file>` (array JSON).
-- **Recording** - Save decoded values to SQLite database with gzip compression
+- **Recording** - Per-frame capture to SQLite via a dedicated non-blocking pipeline (lock-free queue + background decoder thread). Every frame is archived — no 30 Hz sampling, no aggregation. Decoded SPN values are stored as gzip-compressed JSON, each with its own timestamp. Supports kernel timestamps from `candump -t a` / `-t A`
 - **CAN playback** - replay received CAN frames or play your own configuration
 - **Manual mode / reverse-engineering** — build custom SPN definitions directly on top of a live CAN ID without a J1939 DA entry. Pick any byte/bit range in the payload, set resolution/offset/unit/endianness, and see
   the decoded value update live next to the raw bytes (with the selected bits highlighted in red). Supports up to 5 non-contiguous fragments per SPN, little/big endian, and up to 8 custom SPNs per CAN ID. Custom SPNs
@@ -126,11 +128,16 @@ canscope -discover -of discovered.json -e "candump can0" -j1939-csv thirdparty/j
 # Headless mode - stream all decoded values (NDJSON) to stdout
 canscope -hl -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
-# Record mode - write all decoded values + timestamps to SQLite
+# Record mode - capture every frame to SQLite (per-frame, non-blocking)
 canscope -rec -db recording.db -e "candump can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
+
+# Record with kernel timestamps (absolute unix seconds via `-t a`, or wall-clock via `-t A`)
+canscope -rec -db recording.db -e "candump -t a can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
+canscope -rec -db recording.db -e "candump -t A can0" -j1939-xlsx thirdparty/j1939da_2018.xlsx
 
 # Read from stdin (pipe)
 candump can0 | canscope -j1939-csv thirdparty/j1939da_2018.csv
+candump -t a can0 | canscope -rec -db recording.db -j1939-csv thirdparty/j1939da_2018.csv
 ```
 
 > **Note:** J1939 decoding has only been tested with the Digital Annex 2018 edition. Other editions may work but are not guaranteed.
@@ -157,6 +164,28 @@ candump can0 | canscope -j1939-csv thirdparty/j1939da_2018.csv
 | `-of` | `--output-file` | Output file path (used with `-discover`) |
 | `-db` | `--database` | SQLite database path (required with `-rec`) |
 | `-h` | `--help` | Show help |
+
+### Recording format
+
+`-rec` writes a single SQLite database with one row per CAN frame. The schema is optimized for disk usage — raw payloads are not stored (only decoded SPN values in compressed form):
+
+| Column  | Type    | Notes |
+|---------|---------|-------|
+| `id`    | INTEGER | PK, autoincrement |
+| `ts_ms` | INTEGER | Unix milliseconds. Sourced from `candump -t a`/`-t A` when present, otherwise captured at parse time |
+| `iface` | TEXT    | e.g. `can0` |
+| `canid` | TEXT    | 3-digit (SFF) or 8-digit (EFF) hex |
+| `pgn`   | INTEGER | J1939 PGN, `NULL` if the frame isn't J1939 or the Digital Annex wasn't provided |
+| `spns`  | BLOB    | gzip of a JSON array. Each element is `{ts_ms, spn, name, value, unit}` |
+
+Indexes: `ts_ms`, `(canid, ts_ms)`, `(pgn, ts_ms) WHERE pgn IS NOT NULL`. Opened with `journal_mode=WAL`, `synchronous=NORMAL`. Inserts are batched into 1-second transactions.
+
+Quick query example (requires SQLite with JSON1 — decode the gzip blob externally first, or use a helper script):
+
+```sql
+SELECT ts_ms, canid, pgn FROM frames WHERE ts_ms BETWEEN ? AND ? ORDER BY ts_ms;
+SELECT COUNT(*) FROM frames WHERE pgn = 61444;
+```
 
 ## Roadmap
 
