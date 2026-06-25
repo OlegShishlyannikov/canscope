@@ -88,13 +88,15 @@ TEST_CASE("BamReassembler: 3-DTC DM1 (20-byte multipacket) is reassembled", "[ba
   // 3 packets × 7 bytes = 21 raw, truncated to expected_size=20.
   REQUIRE(r.feed(bamData(0xAB, 1, {0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05})).empty());
   REQUIRE(r.feed(bamData(0xAB, 2, {0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C})).empty());
-  auto out = r.feed(bamData(0xAB, 3, {0x0D, 0x0E, 0x0F, 0x10, 0x11, 0xFF, 0xFF}));
+  // seq 3 carries raw offsets 14..20. expected_size=20 keeps 0..19 and drops
+  // offset 20 (the 21st raw byte) as TP padding.
+  auto out = r.feed(bamData(0xAB, 3, {0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13}));
   REQUIRE(out.size() == 1);
   REQUIRE(out[0]->payload.size() == 20);
-  // Last byte of payload is the 20th data byte (offset 19), which is sequence 3 byte 5
-  // = 0x11 in our test data.
-  REQUIRE(out[0]->payload[19] == 0x11);
-  // The TP.DT padding (0xFF) past expected_size should not appear.
+  // Offsets 18 and 19 are seq 3's 5th and 6th data bytes — the last two kept.
+  REQUIRE(out[0]->payload[18] == 0x11);
+  REQUIRE(out[0]->payload[19] == 0x12);
+  // The 21st raw byte (0x13 at offset 20) is past expected_size and must be dropped.
   REQUIRE(out[0]->payload[0] == 0x00);
 }
 
