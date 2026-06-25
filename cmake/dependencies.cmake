@@ -16,8 +16,8 @@ FetchContent_Declare(
   GIT_TAG        v6.0.0
   GIT_SHALLOW    TRUE
   GIT_PROGRESS   TRUE
-  PATCH_COMMAND  git apply ${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-empty-container.patch
-    COMMAND      git apply ${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-window.patch
+  PATCH_COMMAND  sh -c "git apply --reverse --check '${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-empty-container.patch' 2>/dev/null || git apply '${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-empty-container.patch'"
+  COMMAND      sh -c "git apply --reverse --check '${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-window.patch' 2>/dev/null || git apply '${CMAKE_SOURCE_DIR}/cmake/patches/ftxui-window.patch'"
 )
 
 FetchContent_MakeAvailable(ftxui)
@@ -116,11 +116,6 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(yaml_cpp)
 
-# zlib is required for gzip batch compression in the recorder and for batch
-# decompression in the replay generator. System libz on Arch/Manjaro ships only
-# .so; for static builds we need libz.a, so we fetch and build it ourselves —
-# same pattern used for sqlite3. The resulting `zlibstatic` target is linked in
-# for both shared and static canscope builds to keep the link line uniform.
 set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 FetchContent_Declare(

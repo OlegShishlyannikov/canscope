@@ -1,11 +1,6 @@
 @echo off
 setlocal
 
-REM canscope Windows installer.
-REM Runs the bundled Linux install.sh inside WSL. canscope is a Linux-only TUI
-REM (uses SocketCAN); under Windows it lives in a WSL2 distro and is invoked
-REM as `wsl canscope ...` from PowerShell / cmd.
-
 where wsl >nul 2>&1
 if errorlevel 1 (
   echo.
@@ -13,6 +8,20 @@ if errorlevel 1 (
   echo.
   echo Install WSL2 first:
   echo   https://learn.microsoft.com/en-us/windows/wsl/install
+  echo.
+  pause
+  exit /b 1
+)
+
+wsl --list --quiet >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo ERROR: WSL is installed, but no Linux distribution is registered.
+  echo.
+  echo Install one, reboot if prompted, then re-run this script:
+  echo   wsl --install -d Ubuntu
+  echo.
+  echo Available distros:  wsl --list --online
   echo.
   pause
   exit /b 1

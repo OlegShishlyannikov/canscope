@@ -1,6 +1,5 @@
 #include "candump_parser.hpp"
 
-#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <cstdio>
@@ -91,11 +90,28 @@ parsed_candump_s parseCandumpLine(const std::string &line) {
   auto &iface = words[idx(field_e::INTERFACE)];
   auto &canid = words[idx(field_e::CANID)];
 
-  // Validate CAN ID: 3 hex digits (SFF, 11-bit) or 8 (EFF, 29-bit).
+  // Locale-independent ASCII hex check. std::isxdigit's behaviour depends on the
+  // current C locale — on some locales extra code points qualify as "digits",
+  // which can let mangled lines (e.g. from a flaky SSH tunnel) slip through.
+  constexpr auto is_ascii_hex = [](char c) noexcept {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+  };
+
+  // Validate iface name: short ASCII identifier. Covers can0/vcan0/slcan1/any/etc.
+  // Rejects anything containing quotes, spaces, control bytes or non-ASCII.
+  constexpr size_t kIfaceMaxLen = 16;
+  if (iface.empty() || iface.size() > kIfaceMaxLen) return out;
+  for (const char &c : iface) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '_' || c == '-';
+    if (!ok) return out;
+  }
+
+  // Validate CAN ID: exactly 3 hex digits (SFF, 11-bit) or 8 (EFF, 29-bit).
   constexpr auto sff_length_bytes = 3u, eff_length_bytes = 8u;
   if (canid.size() != sff_length_bytes && canid.size() != eff_length_bytes) return out;
   for (const char &c : canid) {
-    if (!std::isxdigit(static_cast<uint8_t>(c))) return out;
+    if (!is_ascii_hex(c)) return out;
   }
 
   // Parse DLC "[N]".

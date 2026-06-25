@@ -272,7 +272,7 @@ ftxui::Component makeMainForm(ftxui::ScreenInteractive *screen, signals_map_t &s
               // Body
               (canidsCont | ftxui::Renderer([](ftxui::Element inner) {
                  return inner | ftxui::focusPositionRelative(0, focus_relative) | ftxui::vscroll_indicator |
-                        ftxui::frame | ftxui::flex;
+                        ftxui::yframe | ftxui::flex;
                })) |
                   ftxui::CatchEvent([](ftxui::Event event) {
                     static constexpr float scroll_step = 0.03f;

@@ -84,6 +84,20 @@ TEST_CASE("parseSpnSize: malformed inputs", "[parsers][size]") {
   REQUIRE_FALSE(parsers::parseSpnSize("2 megabytes").has_value());
 }
 
+TEST_CASE("parseSpnSize: Variable-length sentinel (ASCII SPNs)", "[parsers][size][variable]") {
+  // Full DA string for SPN 234 "Software Identification".
+  auto s = parsers::parseSpnSize("Variable - up to 200 bytes followed by an \"*\" delimiter");
+  REQUIRE(s.has_value());
+  REQUIRE(s->size_bytes == 0u);
+  REQUIRE(s->size_bits == 0u);
+
+  // Any trailing text after the literal "Variable" is accepted.
+  auto s2 = parsers::parseSpnSize("Variable");
+  REQUIRE(s2.has_value());
+  REQUIRE(s2->size_bytes == 0u);
+  REQUIRE(s2->size_bits == 0u);
+}
+
 // ---------------------------------------------------------------- parseSpnOffset
 
 TEST_CASE("parseSpnOffset: zero and integers", "[parsers][offset]") {
@@ -225,7 +239,8 @@ TEST_CASE("parseSpnPosition v4: bit offset prefix + full byte (e.g. '1.5,2')", "
   REQUIRE(p->spn_fragments[1].size == 8u);
 }
 
-TEST_CASE("parseSpnPosition v5: whole bytes + byte with bit offset (e.g. '1-2,3.4', 20-bit SPN)", "[parsers][position]") {
+TEST_CASE("parseSpnPosition v5: whole bytes + byte with bit offset (e.g. '1-2,3.4', 20-bit SPN)",
+          "[parsers][position]") {
   auto p = parsers::parseSpnPosition(20, "1-2,3.4");
   REQUIRE(p.has_value());
   REQUIRE(p->spn_fragments.size() == 2);
@@ -252,4 +267,30 @@ TEST_CASE("parseSpnPosition v6: byte.bit + byte-byte (e.g. '1.3,2-4')", "[parser
 TEST_CASE("parseSpnPosition: rejects garbage", "[parsers][position]") {
   REQUIRE_FALSE(parsers::parseSpnPosition(8, "xyz").has_value());
   REQUIRE_FALSE(parsers::parseSpnPosition(8, "").has_value());
+}
+
+TEST_CASE("parseSpnPosition to-end: '2-N' (Software Identification style)", "[parsers][position][to_end]") {
+  auto p = parsers::parseSpnPosition(0, "2-N");
+  REQUIRE(p.has_value());
+  REQUIRE(p->spn_fragments.size() == 1);
+  REQUIRE(p->spn_fragments[0].byte_offset == 1u); // byte 2 is offset 1 (0-based)
+  REQUIRE(p->spn_fragments[0].bit_offset == 0u);
+  REQUIRE(p->spn_fragments[0].size == 0u); // sentinel: to end of frame
+}
+
+TEST_CASE("parseSpnPosition to-end: '1-N' (whole-frame ASCII)", "[parsers][position][to_end]") {
+  auto p = parsers::parseSpnPosition(0, "1-N");
+  REQUIRE(p.has_value());
+  REQUIRE(p->spn_fragments.size() == 1);
+  REQUIRE(p->spn_fragments[0].byte_offset == 0u);
+  REQUIRE(p->spn_fragments[0].bit_offset == 0u);
+  REQUIRE(p->spn_fragments[0].size == 0u);
+}
+
+TEST_CASE("parseSpnPosition to-end: doesn't collide with numeric v2", "[parsers][position][to_end]") {
+  // '2-3' must still go through the numeric v2 handler and produce a finite size.
+  auto p = parsers::parseSpnPosition(16, "2-3");
+  REQUIRE(p.has_value());
+  REQUIRE(p->spn_fragments.size() == 1);
+  REQUIRE(p->spn_fragments[0].size == 16u); // not the to-end sentinel
 }

@@ -31,6 +31,7 @@
 #include <boost/spirit/include/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
 
+#include "bam_reassembler.hpp"
 #include "candump_parser.hpp"
 #include "discoverer.hpp"
 #include "ftxui/component/component.hpp"
@@ -40,6 +41,7 @@
 #include "process.hpp"
 #include "recorder.hpp"
 #include "signals.hpp"
+#include "socketcan_reader.hpp"
 #include <clipp.h>
 
 std::mutex g_j1939_db_mtx;
@@ -68,7 +70,12 @@ int32_t main(int32_t argc, char *argv[]) {
 
   static struct {
     std::string xlsx_file, csv_file, command = "", output_file = "", record_db_path = "", play_config_path = "";
+    std::string can_ifaces;
     bool show_help = false;
+    // Rotation defaults (used with -rec): 24-hour interval, keep 30 files.
+    // Override via -rec-rotate-sec / -rec-rotate-keep. 0 disables.
+    int64_t rec_rotate_seconds = 24LL * 3600;
+    int64_t rec_rotate_keep = 30;
   } cli_opts;
 
   // Parse cli options
@@ -105,6 +112,14 @@ int32_t main(int32_t argc, char *argv[]) {
          clipp::option("-db", "--database") & clipp::value("SQLite output database path", cli_opts.record_db_path)
                                                   .doc("SQLite database path (used with -rec)"),
 
+         clipp::option("-rec-rotate-sec", "--rotate-seconds") &
+             clipp::value("Rotation interval in seconds", cli_opts.rec_rotate_seconds)
+                 .doc("Rotation interval for -rec, in seconds. Default: 86400 (24h). 0 disables rotation."),
+
+         clipp::option("-rec-rotate-keep", "--rotate-keep") &
+             clipp::value("Max kept files", cli_opts.rec_rotate_keep)
+                 .doc("Max number of rotated .db.gz files retained. Default: 30. 0 disables retention pruning."),
+
          (clipp::option("-play", "--playback-mode")
               .call([&]() {
                 mode = Mode::play;
@@ -116,6 +131,12 @@ int32_t main(int32_t argc, char *argv[]) {
 
          clipp::option("-e", "--execute-command") &
              clipp::value("command", cli_opts.command).call([&]() {}).doc("execute cli command to read its output"),
+
+         clipp::option("-can", "--can-interfaces") &
+             clipp::value("CAN interfaces", cli_opts.can_ifaces)
+                 .doc("Read frames natively via SocketCAN (Linux only). "
+                      "Comma-separated list, e.g. 'can0,can1' or 'any' for all. "
+                      "Mutually exclusive with -e and stdin pipe."),
 
          (clipp::option("-j1939-xlsx") &
           clipp::value("J1939 XLSX file", cli_opts.xlsx_file)
@@ -150,6 +171,11 @@ int32_t main(int32_t argc, char *argv[]) {
     if (cli_opts.show_help) {
       print_usage(man);
       return 0;
+    }
+
+    if (!cli_opts.can_ifaces.empty() && !cli_opts.command.empty()) {
+      fmt::println(stderr, "Error: -can and -e are mutually exclusive (pick one frame source)");
+      return -1;
     }
 
     if (mode == Mode::record && cli_opts.record_db_path.empty()) {
@@ -188,33 +214,53 @@ int32_t main(int32_t argc, char *argv[]) {
         .payload = parsed.payload,
     });
 
-    can_frame_data_s entry;
-    entry.payload = parsed.payload;
-    entry.size = static_cast<int32_t>(parsed.payload.size());
+    auto reassembled = bamReassembler().feed(std::move(raw));
+    for (const auto &f : reassembled) {
+      can_frame_data_s entry;
+      entry.payload = f->payload;
+      entry.size = static_cast<int32_t>(f->payload.size());
 
-    {
-      std::lock_guard<std::mutex> lock(rw_mtx);
-      aggregated[raw->iface][raw->canid] = std::make_shared<can_frame_data_s>(std::move(entry));
+      {
+        std::lock_guard<std::mutex> lock(rw_mtx);
+        aggregated[f->iface][f->canid] = std::make_shared<can_frame_data_s>(std::move(entry));
+      }
+
+      signals_s::map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")->operator()(f);
     }
-
-    signals_s::map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")->operator()(raw);
   };
 
   const bool needs_input = (mode != Mode::play);
+  const bool use_socketcan = !cli_opts.can_ifaces.empty();
 
-  // If reading from stdin pipe, save the pipe fd and reopen stdin as /dev/tty for FTXUI
   static int candump_fd = -1;
-  if (needs_input && cli_opts.command.empty()) {
+  if (needs_input && cli_opts.command.empty() && !use_socketcan) {
     candump_fd = ::dup(STDIN_FILENO);
     std::freopen("/dev/tty", "r", stdin);
   }
 
-  // Reads candump data from stdin pipe or subprocess and aggregates it
+  // SocketCAN reader (Linux only). Stays valid across the lifetime of the
+  // aggregator_task that owns its run-loop.
+  static std::unique_ptr<SocketCanReader> can_reader;
+  if (use_socketcan && needs_input) {
+    try {
+      can_reader = std::make_unique<SocketCanReader>(cli_opts.can_ifaces, true);
+    } catch (const std::exception &e) {
+      fmt::println(stderr, "Error: {}", e.what());
+      return -1;
+    }
+  }
+
+  // Reads candump data from stdin pipe / subprocess / SocketCAN and aggregates it
   std::future<void> aggregator_task;
   if (needs_input) {
     aggregator_task = std::async(
         std::launch::async,
         [command = cli_opts.command](std::stop_token stop_token) {
+          if (can_reader) {
+            can_reader->run(stop_token);
+            return;
+          }
+
           if (command.empty()) {
 
             // Read from the saved pipe fd using epoll to avoid blocking on stop
@@ -272,19 +318,26 @@ int32_t main(int32_t argc, char *argv[]) {
                 .on_stdout_close = []() {},
             };
 
+            auto line_buf = std::make_shared<std::string>();
             p = new TinyProcessLib::Process(
                 command, "",
-                [stop_token](const char *bytes, size_t n) {
+                [stop_token, line_buf](const char *bytes, size_t n) {
                   if (n > PIPE_BUF || stop_token.stop_requested()) {
                     return;
                   }
 
-                  std::string buf(bytes, n), line;
-                  std::istringstream ss(buf);
+                  line_buf->append(bytes, n);
 
-                  while (std::getline(ss, line)) {
-                    parse_candump_line(line);
+                  size_t pos = 0;
+                  while (true) {
+                    size_t nl = line_buf->find('\n', pos);
+                    if (nl == std::string::npos) {
+                      break;
+                    }
+                    parse_candump_line(line_buf->substr(pos, nl - pos));
+                    pos = nl + 1;
                   }
+                  line_buf->erase(0, pos);
                 },
                 [](const char *, size_t) {}, false, cfg);
 
@@ -406,7 +459,9 @@ int32_t main(int32_t argc, char *argv[]) {
   }
 
   if (mode == Mode::record) {
-    recorder = std::make_unique<Recorder>(cli_opts.record_db_path, true);
+    const int64_t rotate_interval_ms = cli_opts.rec_rotate_seconds <= 0 ? 0 : cli_opts.rec_rotate_seconds * 1000;
+    const size_t rotate_max_files = cli_opts.rec_rotate_keep <= 0 ? 0 : static_cast<size_t>(cli_opts.rec_rotate_keep);
+    recorder = std::make_unique<Recorder>(cli_opts.record_db_path, true, rotate_interval_ms, rotate_max_files);
     signals.map.get<void(const std::shared_ptr<const raw_frame_s> &)>("raw_frame")
         ->connect([](const std::shared_ptr<const raw_frame_s> &frame) { recorder->pushFrame(frame); });
     signals.map.get<void(sqlite::database &)>("j1939_database_ready")->connect([](sqlite::database &db) {

@@ -66,12 +66,8 @@ ftxui::Component Empty() {
 }
 
 ftxui::Component Basic(const std::string &value, ftxui::Color c, bool is_last) {
-  return ftxui::Renderer([value, c, is_last](bool) {
-    auto element = ftxui::paragraph(value) | color(c);
-    if (!is_last)
-      element = ftxui::hbox({element, ftxui::text(",")});
-    return element;
-  });
+  const std::string display = is_last ? value : value + ",";
+  return ftxui::Renderer([display, c](bool) { return ftxui::paragraph(display) | color(c); });
 }
 
 bool IsSuitableForTableView(const nlohmann::json &) { return false; }
@@ -80,7 +76,7 @@ ftxui::Component Indentation(const ftxui::Component &child) {
   return ftxui::Renderer(child, [child] {
     return ftxui::hbox({
         ftxui::text("  "),
-        child->Render(),
+        child->Render() | ftxui::xflex,
     });
   });
 }
@@ -166,7 +162,8 @@ ftxui::Component FromKeyValue(const std::string &key, const nlohmann::json &valu
     return ftxui::hbox({
         ftxui::text(str) | color(ftxui::Color::BlueLight),
         ftxui::text(": "),
-        child->Render(),
+
+        child->Render() | ftxui::xflex,
     });
   });
 }
@@ -374,11 +371,14 @@ static ftxui::Component LiveLeaf(std::shared_ptr<nlohmann::json> root, nlohmann:
       c = ftxui::Color::White;
     }
 
-    auto element = ftxui::paragraph(text_str) | color(c) | ftxui::xflex_shrink;
+    // Inline the trailing comma into the paragraph string. Wrapping paragraph
+    // in an extra hbox({paragraph, ","}) would hide the paragraph's flex-shrink
+    // request behind a non-shrinkable sibling — long multi-line values (e.g.
+    // J1939 DA "Description") would then overflow the terminal's right edge.
+    const std::string display = is_last ? text_str : text_str + ",";
+    auto element = ftxui::paragraph(display) | color(c) | ftxui::xflex;
     if (focused)
       element = element | ftxui::inverted | ftxui::focus;
-    if (!is_last)
-      element = ftxui::hbox({element, ftxui::text(",")});
     return element;
   });
 }

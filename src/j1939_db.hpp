@@ -21,6 +21,8 @@ struct J1939MappingTables {
         {"PS", {12u, "ps"}},
         {"PG Data Length", {15u, "pg_datalen"}},
         {"Default Priority", {16u, "pg_priority"}},
+        {"Repeat Group Offset", {36u, "repeat_offset"}},
+        {"Repeat Group Stride", {37u, "repeat_stride"}},
     };
     return t;
   }
@@ -38,6 +40,7 @@ struct J1939MappingTables {
         {"SLOT Identifier", {28u, "slot_id"}},
         {"SLOT Name", {29u, "slot_name"}},
         {"SPN Type", {30u, "spn_type"}},
+        {"SPN In Repeat Group", {38u, "in_repeat_group"}},
     };
     return t;
   }

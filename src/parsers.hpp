@@ -43,12 +43,30 @@ struct spn_fragments_s {
 
 // Parse resolution string to this struct
 struct resolution_s {
-  enum class type_e { numeric, enum_states, binary, ascii };
+  enum class type_e { numeric, enum_states, binary, ascii, enum_states_table };
   double resolution = 1.0;
   type_e type = type_e::numeric;
+  std::string table_name;
 };
 
-// Map resolution_s::type_e to a lowercase string tag used in SQLite / JSON
+inline std::string resolutionEncodingTag(const resolution_s &r) {
+  switch (r.type) {
+  case resolution_s::type_e::numeric:
+    return "numeric";
+  case resolution_s::type_e::enum_states:
+    return "enum";
+  case resolution_s::type_e::binary:
+    return "binary";
+  case resolution_s::type_e::ascii:
+    return "ascii";
+  case resolution_s::type_e::enum_states_table:
+    return std::string("table:") + r.table_name;
+  }
+  return "numeric";
+}
+
+// Legacy single-arg form kept for callers that only have a type and don't
+// need the table name. Returns the generic "table" tag for enum_states_table.
 inline const char *resolutionTypeName(resolution_s::type_e t) {
   switch (t) {
   case resolution_s::type_e::numeric:
@@ -59,6 +77,8 @@ inline const char *resolutionTypeName(resolution_s::type_e t) {
     return "binary";
   case resolution_s::type_e::ascii:
     return "ascii";
+  case resolution_s::type_e::enum_states_table:
+    return "table";
   }
   return "numeric";
 }
@@ -124,9 +144,14 @@ template <typename It> struct size_parser_s : _detail::parser_s<It, size_s> {
       }
     };
 
+    struct variable_size_s {
+      size_s operator()() const { return {.size_bytes = 0u, .size_bits = 0u}; }
+    };
+
     this->rule =
         ((qi::uint_ >> "byte") | (qi::uint_ >> "bytes"))[_val = boost::phoenix::function<bytes_to_bits_s>{}(qi::_1)] |
-        ((qi::uint_ >> "bit") | (qi::uint_ >> "bits"))[_val = boost::phoenix::function<as_bits_s>{}(qi::_1)];
+        ((qi::uint_ >> "bit") | (qi::uint_ >> "bits"))[_val = boost::phoenix::function<as_bits_s>{}(qi::_1)] |
+        (qi::lit("Variable") >> *qi::char_)[_val = boost::phoenix::function<variable_size_s>{}()];
   }
 };
 }; // namespace size
@@ -280,6 +305,21 @@ template <typename It> struct position_parser_s : _detail::parser_s<It, spn_frag
       }
     };
 
+    struct rule_to_end_handler_s {
+      spn_fragments_s operator()(uint32_t start_byte) const {
+        return {
+            .spn_fragments =
+                {
+                    {
+                        .byte_offset = (start_byte - 1u),
+                        .bit_offset = 0u,
+                        .size = 0u,
+                    },
+                },
+        };
+      }
+    };
+
     position_rule_v0 = (qi::uint_)[qi::_val = boost::phoenix::function<rule_v0_handler_s>{}(qi::_1)];
     position_rule_v1 = (qi::uint_ >> '.' >>
                         qi::uint_)[qi::_val = boost::phoenix::function<rule_v1_handler_s>{}(size_bits, qi::_1, qi::_2)];
@@ -296,14 +336,15 @@ template <typename It> struct position_parser_s : _detail::parser_s<It, spn_frag
     position_rule_v6 =
         (qi::uint_ >> '.' >> qi::uint_ >> ',' >> qi::uint_ >> '-' >>
          qi::uint_)[qi::_val = boost::phoenix::function<rule_v6_handler_s>{}(qi::_1, qi::_2, qi::_3, qi::_4)];
+    position_rule_to_end =
+        (qi::uint_ >> '-' >> qi::lit("N"))[qi::_val = boost::phoenix::function<rule_to_end_handler_s>{}(qi::_1)];
 
-    // If one of rules works
-    this->rule = position_rule_v6 | position_rule_v5 | position_rule_v4 | position_rule_v3 | position_rule_v2 |
-                 position_rule_v1 | position_rule_v0;
+    this->rule = position_rule_to_end | position_rule_v6 | position_rule_v5 | position_rule_v4 | position_rule_v3 |
+                 position_rule_v2 | position_rule_v1 | position_rule_v0;
   }
 
   qi::rule<It, spn_fragments_s(), ascii::space_type> position_rule_v0, position_rule_v1, position_rule_v2,
-      position_rule_v3, position_rule_v4, position_rule_v5, position_rule_v6;
+      position_rule_v3, position_rule_v4, position_rule_v5, position_rule_v6, position_rule_to_end;
 };
 }; // namespace position
 
@@ -348,6 +389,18 @@ template <typename It> struct resolution_parser_s : _detail::parser_s<It, resolu
       resolution_s operator()() const { return {.resolution = 1.0, .type = resolution_s::type_e::ascii}; }
     };
 
+    struct resolution_rule_table_handler_s {
+      using result_type = resolution_s;
+      resolution_s operator()(const std::vector<char> &name) const {
+        std::string lower;
+        lower.reserve(name.size());
+        for (char c : name) {
+          lower.push_back(static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));
+        }
+        return {.resolution = 1.0, .type = resolution_s::type_e::enum_states_table, .table_name = std::move(lower)};
+      }
+    };
+
     this->strnum = lexeme[-(qi::char_('+') | qi::char_('-')) >> +(qi::digit | qi::char_(',') | qi::char_('.'))];
     this->num = this->strnum[_val = boost::phoenix::function<_detail::string_to_double_s>{}(qi::_1)];
 
@@ -361,13 +414,17 @@ template <typename It> struct resolution_parser_s : _detail::parser_s<It, resolu
     resolution_rule_binary =
         qi::lit("Binary")[qi::_val = boost::phoenix::function<resolution_rule_binary_handler_s>{}()];
     resolution_rule_ascii = qi::lit("ASCII")[qi::_val = boost::phoenix::function<resolution_rule_ascii_handler_s>{}()];
+    resolution_rule_table =
+        (qi::lit("Table:") >>
+         qi::lexeme[+qi::char_("a-zA-Z0-9_")])[qi::_val =
+                                                   boost::phoenix::function<resolution_rule_table_handler_s>{}(qi::_1)];
 
-    this->rule =
-        resolution_rule_binary | resolution_rule_ascii | resolution_rule_v2 | resolution_rule_v1 | resolution_rule_v0;
+    this->rule = resolution_rule_table | resolution_rule_binary | resolution_rule_ascii | resolution_rule_v2 |
+                 resolution_rule_v1 | resolution_rule_v0;
   }
 
   qi::rule<It, resolution_s(), ascii::space_type> resolution_rule_v0, resolution_rule_v1, resolution_rule_v2,
-      resolution_rule_binary, resolution_rule_ascii;
+      resolution_rule_binary, resolution_rule_ascii, resolution_rule_table;
 };
 }; // namespace resolution
 

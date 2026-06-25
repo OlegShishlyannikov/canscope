@@ -167,49 +167,73 @@ CanIDUnit::CanIDUnit(const std::string &iface, const std::string &canid, const s
 
   auto contentbox = ftxui::Checkbox({
       .transform = [this](const ftxui::EntryState &state) -> ftxui::Element {
-        ftxui::Elements line;
+        constexpr size_t kBytesPerRow = 8;
 
-        // Interface
-        line.push_back(ftxui::text(m_id_.iface + " ") |
-                       (m_payload_.diff.is_new_interface ? (ftxui::color(ftxui::Color::Red) | ftxui::bold)
-                                                         : ftxui::color(ftxui::Color::Aquamarine1) | ftxui::bold));
+        const std::string header_iface = m_id_.iface + " ";
+        const std::string header_canid = fmt::format("{:8} ", m_id_.canid);
+        const std::string header_size = fmt::format("{:2} ", m_payload_.data.size());
+        const std::string indent(header_iface.size() + header_canid.size() + header_size.size(), ' ');
 
-        // CAN ID
-        line.push_back(ftxui::text(fmt::format("{:8} ", m_id_.canid)) |
-                       (m_payload_.diff.is_new_canid ? (ftxui::color(ftxui::Color::Red) | ftxui::bold)
-                                                     : ftxui::color(ftxui::Color::GreenLight) | ftxui::bold));
-
-        // Size
-        line.push_back(ftxui::text(fmt::format("{} ", m_payload_.data.size())));
-
-        // Padding for < 8 bytes
-        for (size_t i = m_payload_.data.size(); i < 8; ++i)
-          line.push_back(ftxui::text("---- "));
-
-        // Payload bytes with diff highlighting
         bool has_updates = false;
-        for (size_t idx = 0; idx < m_payload_.data.size(); ++idx) {
-          bool changed = idx < m_payload_.diff.payload_changed.size() && m_payload_.diff.payload_changed[idx];
-
-          if (changed) {
+        for (size_t i = 0; i < m_payload_.diff.payload_changed.size(); ++i) {
+          if (m_payload_.diff.payload_changed[i]) {
             has_updates = true;
+            break;
           }
-
-          line.push_back(ftxui::text(fmt::format("0x{:02X} ", m_payload_.data[idx])) |
-                         (changed ? (ftxui::color(ftxui::Color::Red) | ftxui::bold) : ftxui::nothing));
         }
 
-        // Last update time
-        line.push_back(
+        const size_t first_row_bytes = std::min(m_payload_.data.size(), kBytesPerRow);
+
+        ftxui::Elements current;
+        current.push_back(ftxui::text(header_iface) |
+                          (m_payload_.diff.is_new_interface ? (ftxui::color(ftxui::Color::Red) | ftxui::bold)
+                                                            : ftxui::color(ftxui::Color::Aquamarine1) | ftxui::bold));
+        current.push_back(ftxui::text(header_canid) |
+                          (m_payload_.diff.is_new_canid ? (ftxui::color(ftxui::Color::Red) | ftxui::bold)
+                                                        : ftxui::color(ftxui::Color::GreenLight) | ftxui::bold));
+        current.push_back(ftxui::text(header_size));
+
+        for (size_t i = m_payload_.data.size(); i < kBytesPerRow; ++i) {
+          current.push_back(ftxui::text("---- "));
+        }
+
+        for (size_t idx = 0; idx < first_row_bytes; ++idx) {
+          const bool changed = idx < m_payload_.diff.payload_changed.size() && m_payload_.diff.payload_changed[idx];
+          current.push_back(ftxui::text(fmt::format("0x{:02X} ", m_payload_.data[idx])) |
+                            (changed ? (ftxui::color(ftxui::Color::Red) | ftxui::bold) : ftxui::nothing));
+        }
+
+        current.push_back(
             ftxui::text(fmt::format("(updated: {})", m_payload_.last_update_time)) |
             (has_updates ? (ftxui::color(ftxui::Color::Red) | ftxui::bold) : ftxui::color(ftxui::Color::Cyan)));
 
-        auto row = ftxui::hbox(std::move(line));
-        if (m_ui_.hovered) {
-          row = row | ftxui::bold | ftxui::bgcolor(ftxui::Color::Grey11);
+        ftxui::Elements rows;
+        rows.push_back(ftxui::hbox(std::move(current)));
+
+        for (size_t idx = kBytesPerRow; idx < m_payload_.data.size(); ++idx) {
+          if ((idx - kBytesPerRow) % kBytesPerRow == 0) {
+            current.clear();
+            current.push_back(ftxui::text(indent));
+          }
+
+          const bool changed = idx < m_payload_.diff.payload_changed.size() && m_payload_.diff.payload_changed[idx];
+          current.push_back(ftxui::text(fmt::format("0x{:02X} ", m_payload_.data[idx])) |
+                            (changed ? (ftxui::color(ftxui::Color::Red) | ftxui::bold) : ftxui::nothing));
+
+          const bool row_complete = (idx - kBytesPerRow + 1) % kBytesPerRow == 0;
+          const bool last_byte = idx + 1 == m_payload_.data.size();
+
+          if (row_complete || last_byte) {
+            rows.push_back(ftxui::hbox(std::move(current)));
+          }
         }
 
-        return row | ftxui::reflect(m_ui_.box);
+        ftxui::Element block = rows.size() == 1 ? std::move(rows[0]) : ftxui::vbox(std::move(rows));
+        if (m_ui_.hovered) {
+          block = block | ftxui::bold | ftxui::bgcolor(ftxui::Color::Grey11);
+        }
+
+        return block | ftxui::reflect(m_ui_.box);
       },
 
       .on_change =

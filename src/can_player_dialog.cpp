@@ -73,6 +73,9 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
         float resolution, offset, min, max, current;
         std::string unit;
         int32_t slider_percent;
+        // Backing buffer for the manual-entry Input below the slider; kept
+        // in sync with `current` so the two widgets are always coherent.
+        std::string value_input;
         size_t raw;
         std::vector<fragment_s> fragments;
         struct pgn_parameters_s *pg_ref = nullptr;
@@ -117,34 +120,63 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
         ::close(can_socket);
       };
 
-      static const auto calculate_spn = [](spn_parameters_s &spn_params) {
-        // Calculate value from slider percentage
-        spn_params.current =
-            ((spn_params.slider_percent / 100.0f) * (spn_params.max - spn_params.min)) + spn_params.offset;
-
-        // Round and clamp by min/max
+      // Common path: caller has already set `spn_params.current` to the
+      // desired (pre-clamp) value. We then clamp, recompute raw, write the
+      // value into the PG payload, and resync the two display widgets
+      // (slider %, text input). `update_text` lets the input-driven path
+      // skip rewriting `value_input` so the user can keep typing without
+      // their text getting reformatted mid-character.
+      static const auto apply_spn_value = [](spn_parameters_s &spn_params, bool update_text) {
         spn_params.current = std::clamp(std::round(spn_params.current), spn_params.min, spn_params.max);
         spn_params.raw = (spn_params.current - spn_params.offset) / spn_params.resolution;
+
+        // Resync slider from current so dragging from either widget keeps
+        // both consistent. Avoid div-by-zero on degenerate min==max ranges.
+        if (spn_params.max > spn_params.min) {
+          spn_params.slider_percent = static_cast<int32_t>(
+              std::round(((spn_params.current - spn_params.offset) / (spn_params.max - spn_params.min)) * 100.0f));
+          spn_params.slider_percent = std::clamp(spn_params.slider_percent, 0, 100);
+        }
+
+        if (update_text) {
+          spn_params.value_input = fmt::format("{:g}", spn_params.current);
+        }
+
         auto raw = spn_params.raw;
 
-        // Swap bytes if needed
+        // Swap bytes if needed.
+        //
+        // Pure bit arithmetic — no reinterpret_cast over the local raw.
+        // The previous incarnation copied bytes into a `new uint8_t[size]`
+        // buffer and then read `*reinterpret_cast<size_t*>(...)` from it,
+        // which is undefined behaviour whenever the SPN's byte width is
+        // narrower than sizeof(size_t): the high-order bytes of the
+        // returned value were read from past the buffer's end and leaked
+        // into spn_params.raw once we started persisting the post-swap
+        // value for the UI. This version constructs the swapped value
+        // byte-by-byte and keeps the unused upper bytes zero.
         if (spn_params.little_endian) {
-          // Get size
-          size_t size = 0;
+          size_t total_bits = 0;
           for (const auto &frag : spn_params.fragments) {
-            size += frag.size;
+            total_bits += frag.size;
           }
-
-          size /= UINT8_WIDTH;
-          if (size > 1) {
-            auto swapped = std::shared_ptr<uint8_t>(new uint8_t[size], [](auto *p) { delete[] p; });
+          const size_t size = total_bits / UINT8_WIDTH;
+          if (size > 1 && size <= sizeof(raw)) {
+            size_t swapped = 0;
             for (size_t i = 0; i < size; ++i) {
-              swapped.get()[i] = reinterpret_cast<uint8_t *>(&raw)[size - i - 1];
+              const uint8_t b = static_cast<uint8_t>((raw >> ((size - 1 - i) * UINT8_WIDTH)) & 0xFF);
+              swapped |= static_cast<size_t>(b) << (i * UINT8_WIDTH);
             }
-
-            raw = *reinterpret_cast<decltype(raw) *>(swapped.get());
+            raw = swapped;
           }
         }
+
+        // Persist the post-swap raw so the "Raw" display reflects the
+        // bytes that will actually hit the wire — without this, toggling
+        // endianness only redraws the PG payload binary view while the
+        // Raw row stays frozen on the pre-swap value, which is confusing.
+        // `current` (physical value, user intent) intentionally stays put.
+        spn_params.raw = raw;
 
         // Magic here
         {
@@ -165,6 +197,28 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
             raw >>= fragment.size;
           }
         }
+      };
+
+      // Slider on_change path: map slider % into the physical value range,
+      // then apply. `update_text=true` so the manual-entry box gets the
+      // freshly clamped/rounded value.
+      static const auto calculate_spn = [](spn_parameters_s &spn_params) {
+        spn_params.current =
+            ((spn_params.slider_percent / 100.0f) * (spn_params.max - spn_params.min)) + spn_params.offset;
+        apply_spn_value(spn_params, /*update_text=*/true);
+      };
+
+      // Manual-entry path: parse the text the user is typing, push it
+      // through the same apply step. Parse failures (transient state while
+      // typing "1.", "-", etc.) are silently ignored — we leave the slider
+      // and payload alone until the text becomes a valid number again.
+      static const auto calculate_spn_from_input = [](spn_parameters_s &spn_params) {
+        try {
+          spn_params.current = static_cast<float>(std::stod(spn_params.value_input));
+        } catch (...) {
+          return;
+        }
+        apply_spn_value(spn_params, /*update_text=*/false);
       };
 
       static const auto stop_pg = [](pgn_parameters_s &pg) {
@@ -288,6 +342,7 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                                                                            .current = 0.0f,
                                                                            .unit = unit,
                                                                            .slider_percent = 0,
+                                                                           .value_input = "0",
                                                                            .fragments = fragments,
                                                                            .pg_ref = &pgs[pgn],
                                                                        });
@@ -339,6 +394,36 @@ ftxui::Component makeCanPlayerDialog(ftxui::ScreenInteractive *scr, signals_map_
                                                                      ftxui::text("]"),
                                                                  }) |
                                                                  ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 100u);
+                                                        }),
+
+                                                        // Manual numeric entry — mirrors the slider in both
+                                                        // directions. Typing here clamps to [min, max] and
+                                                        // updates the slider; moving the slider updates the
+                                                        // text. See calculate_spn / calculate_spn_from_input.
+                                                        ftxui::Container::Horizontal({
+                                                            ftxui::Renderer([]() {
+                                                              return ftxui::text("Manual:") | ftxui::bold |
+                                                                     ftxui::color(ftxui::Color::Yellow);
+                                                            }),
+                                                            ftxui::Renderer([]() {
+                                                              return ftxui::text(" ");
+                                                            }),
+                                                            ftxui::Input(ftxui::InputOption{
+                                                                .content = &spn_params.value_input,
+                                                                .placeholder = "value",
+                                                                .multiline = false,
+                                                                .on_change =
+                                                                    [&spn_params = spns[spn]]() {
+                                                                      calculate_spn_from_input(spn_params);
+                                                                    },
+                                                            }) | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 16u) |
+                                                                ftxui::Renderer([](ftxui::Element inner) {
+                                                                  return ftxui::hbox({
+                                                                      ftxui::text("["),
+                                                                      inner,
+                                                                      ftxui::text("]"),
+                                                                  });
+                                                                }),
                                                         }),
 
                                                         ftxui::Container::Horizontal({

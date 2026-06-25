@@ -258,55 +258,77 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
           return false;
         };
 
-        // Hex
-        ftxui::Elements hex_els;
-        hex_els.push_back(ftxui::text("{ "));
-        for (size_t i = 0; i < data.size(); ++i) {
-          auto val = fmt::format("0x{:02X}", data[i]);
-          auto t = ftxui::text(i + 1 < data.size() ? fmt::format("{:<15s}", val + ",") : fmt::format("{:<15s}", val));
-          hex_els.push_back(byte_in_range(static_cast<int32_t>(i)) ? (t | ftxui::color(ftxui::Color::Red) | ftxui::bold)
-                                                                   : t);
-        }
+        constexpr size_t kBytesPerRow = 8;
+        ftxui::Elements payload_groups;
 
-        hex_els.push_back(ftxui::text(" }"));
+        const auto kRedBold = ftxui::color(ftxui::Color::Red) | ftxui::bold;
+        const std::string kIndent = "  ";
 
-        // Dec
-        ftxui::Elements dec_els;
-        dec_els.push_back(ftxui::text("{ "));
+        for (size_t group_start = 0; group_start < data.size(); group_start += kBytesPerRow) {
+          const size_t group_end = std::min(group_start + kBytesPerRow, data.size());
+          const bool first_group = group_start == 0;
+          const bool last_group = group_end == data.size();
 
-        for (size_t i = 0; i < data.size(); ++i) {
-          auto val = fmt::format("{}", data[i]);
-          auto t = ftxui::text(i + 1 < data.size() ? fmt::format("{:<15s}", val + ",") : fmt::format("{:<15s}", val));
-          dec_els.push_back(byte_in_range(static_cast<int32_t>(i)) ? (t | ftxui::color(ftxui::Color::Red) | ftxui::bold)
-                                                                   : t);
-        }
+          ftxui::Elements hex_row, dec_row, bin_row;
 
-        dec_els.push_back(ftxui::text(" }"));
+          const std::string left_pad = first_group ? "{ " : kIndent;
+          hex_row.push_back(ftxui::text(left_pad));
+          dec_row.push_back(ftxui::text(left_pad));
+          bin_row.push_back(ftxui::text(left_pad));
 
-        // Bin — per-bit highlighting across all fragments
-        ftxui::Elements bin_els;
-        bin_els.push_back(ftxui::text("{ "));
+          for (size_t i = group_start; i < group_end; ++i) {
+            const bool is_last_byte = (i + 1 == data.size());
+            const bool byte_hit = byte_in_range(static_cast<int32_t>(i));
 
-        for (size_t i = 0; i < data.size(); ++i) {
-          ftxui::Elements bits;
-          bits.push_back(ftxui::text("0b"));
+            // Hex cell
+            {
+              auto val = fmt::format("0x{:02X}", data[i]);
+              auto t = ftxui::text(is_last_byte ? fmt::format("{:<15s}", val) : fmt::format("{:<15s}", val + ","));
+              hex_row.push_back(byte_hit ? (t | kRedBold) : t);
+            }
 
-          for (int32_t b = 7; b >= 0; --b) {
-            int32_t global_bit = static_cast<int32_t>(i) * UINT8_WIDTH + b;
-            char ch = (data[i] >> b) & 1 ? '1' : '0';
-            auto t = ftxui::text(std::string(1, ch));
-            bits.push_back(bit_in_range(global_bit) ? (t | ftxui::color(ftxui::Color::Red) | ftxui::bold) : t);
+            // Dec cell
+            {
+              auto val = fmt::format("{}", data[i]);
+              auto t = ftxui::text(is_last_byte ? fmt::format("{:<15s}", val) : fmt::format("{:<15s}", val + ","));
+              dec_row.push_back(byte_hit ? (t | kRedBold) : t);
+            }
+
+            // Bin cell — per-bit highlighting (a fragment may span only
+            // part of a byte, so we can't use byte_hit here).
+            {
+              ftxui::Elements bits;
+              bits.push_back(ftxui::text("0b"));
+              for (int32_t b = 7; b >= 0; --b) {
+                const int32_t global_bit = static_cast<int32_t>(i) * UINT8_WIDTH + b;
+                const char ch = (data[i] >> b) & 1 ? '1' : '0';
+                auto t = ftxui::text(std::string(1, ch));
+                bits.push_back(bit_in_range(global_bit) ? (t | kRedBold) : t);
+              }
+              if (!is_last_byte) {
+                bits.push_back(ftxui::text(","));
+              }
+              // Lock to 15-char column width to match the hex/dec cells.
+              bin_row.push_back(ftxui::hbox(std::move(bits)) | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 15));
+            }
           }
 
-          if (i + 1 < data.size()) {
-            bits.push_back(ftxui::text(","));
+          if (last_group) {
+            hex_row.push_back(ftxui::text(" }"));
+            dec_row.push_back(ftxui::text(" }"));
+            bin_row.push_back(ftxui::text(" }"));
           }
 
-          // Force each byte cell to the same 15-char width as the hex/dec rows so the closing `}` aligns.
-          bin_els.push_back(ftxui::hbox(std::move(bits)) | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 15));
-        }
+          payload_groups.push_back(ftxui::vbox({
+              ftxui::hbox(std::move(hex_row)),
+              ftxui::hbox(std::move(dec_row)),
+              ftxui::hbox(std::move(bin_row)),
+          }));
 
-        bin_els.push_back(ftxui::text(" }"));
+          if (!last_group) {
+            payload_groups.push_back(ftxui::separatorEmpty());
+          }
+        }
 
         // Extract value from all fragments (always LE within each fragment)
         int64_t result = 0;
@@ -350,13 +372,8 @@ ftxui::Component makeSpnSettingsForm(ftxui::ScreenInteractive *screen, signals_m
         double value = static_cast<double>(result) * resolution + offset_val;
 
         return ftxui::vbox({
+            ftxui::vbox(std::move(payload_groups)),
             ftxui::separatorEmpty(),
-            ftxui::separatorEmpty(),
-            ftxui::vbox({
-                ftxui::hbox(hex_els),
-                ftxui::hbox(dec_els),
-                ftxui::hbox(bin_els),
-            }) | ftxui::xframe,
             ftxui::hbox({
                 ftxui::text("Value: ") | ftxui::bold,
                 ftxui::text(fmt::format("({:0{}} | 0x{:0{}X} | 0b{:0{}b}) * {} + {} = ", result,

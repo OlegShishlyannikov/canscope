@@ -15,8 +15,13 @@ include(Catch)
 add_executable(canscope_tests
   test_parsers.cpp
   test_candump_parser.cpp
+  test_bam_reassembler.cpp
+  test_dm1_positions.cpp
+  test_enum_tables.cpp
   ${CMAKE_SOURCE_DIR}/src/parsers.cpp
   ${CMAKE_SOURCE_DIR}/src/candump_parser.cpp
+  ${CMAKE_SOURCE_DIR}/src/bam_reassembler.cpp
+  ${CMAKE_SOURCE_DIR}/src/enum_tables.cpp
 )
 
 target_include_directories(canscope_tests PRIVATE

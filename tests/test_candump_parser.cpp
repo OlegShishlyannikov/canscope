@@ -6,7 +6,8 @@
 
 namespace {
 int64_t now_ms() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+      .count();
 }
 } // namespace
 
@@ -156,4 +157,30 @@ TEST_CASE("parseCandumpLine: payload byte isn't 2 hex digits", "[candump][invali
 TEST_CASE("parseCandumpLine: too few fields", "[candump][invalid]") {
   REQUIRE(parseCandumpLine("can0 123").kind == parsed_candump_s::kind_e::invalid);
   REQUIRE(parseCandumpLine("can0").kind == parsed_candump_s::kind_e::invalid);
+}
+
+// -------------------------------------------------------- strict iface validation
+
+TEST_CASE("parseCandumpLine: iface with special chars is rejected", "[candump][invalid][iface]") {
+  REQUIRE(parseCandumpLine("c@n0 123 [1] 00").kind == parsed_candump_s::kind_e::invalid);
+  REQUIRE(parseCandumpLine("'can0' 123 [1] 00").kind == parsed_candump_s::kind_e::invalid);
+  REQUIRE(parseCandumpLine("can 0 123 [1] 00").kind == parsed_candump_s::kind_e::invalid);
+}
+
+TEST_CASE("parseCandumpLine: iface longer than 16 chars is rejected", "[candump][invalid][iface]") {
+  REQUIRE(parseCandumpLine("very_long_interface_name 123 [1] 00").kind == parsed_candump_s::kind_e::invalid);
+}
+
+TEST_CASE("parseCandumpLine: common SocketCAN iface names accepted", "[candump][iface]") {
+  REQUIRE(parseCandumpLine("can0   123 [1] 00").kind == parsed_candump_s::kind_e::data);
+  REQUIRE(parseCandumpLine("vcan0  123 [1] 00").kind == parsed_candump_s::kind_e::data);
+  REQUIRE(parseCandumpLine("slcan1 123 [1] 00").kind == parsed_candump_s::kind_e::data);
+  REQUIRE(parseCandumpLine("any    123 [1] 00").kind == parsed_candump_s::kind_e::data);
+  REQUIRE(parseCandumpLine("can-fd 123 [1] 00").kind == parsed_candump_s::kind_e::data);
+}
+
+// -------------------------------------------------------- strict hex check (locale-independent)
+
+TEST_CASE("parseCandumpLine: non-ASCII 'digits' in CAN ID are rejected", "[candump][invalid][canid]") {
+  REQUIRE(parseCandumpLine("can0 \xD9\xA3\xD9\xA1\xD9\xA2 [1] 00").kind == parsed_candump_s::kind_e::invalid);
 }

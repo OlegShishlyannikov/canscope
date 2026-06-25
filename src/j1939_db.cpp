@@ -19,7 +19,9 @@ void initJ1939Database(sqlite::database &db) {
       pf INTEGER,
       ps INTEGER,
       pg_datalen INTEGER,
-      pg_priority INTEGER
+      pg_priority INTEGER,
+      repeat_offset INTEGER,
+      repeat_stride INTEGER
     );
   )";
 
@@ -27,7 +29,7 @@ void initJ1939Database(sqlite::database &db) {
     CREATE TABLE IF NOT EXISTS spns (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       pgn INTEGER,
-      spn INTEGER UNIQUE,
+      spn INTEGER,
       spn_name TEXT,
       spn_pos TEXT,
       spn_length INTEGER,
@@ -40,7 +42,9 @@ void initJ1939Database(sqlite::database &db) {
       slot_id TEXT,
       slot_name TEXT,
       spn_type TEXT,
-      value_encoding TEXT
+      value_encoding TEXT,
+      in_repeat_group INTEGER,
+      UNIQUE (pgn, spn)
     );
   )";
 
@@ -67,6 +71,7 @@ void initJ1939Database(sqlite::database &db) {
 std::string buildPgnInsertSql() {
   const auto &pgn_mapping = J1939MappingTables::pgn();
   std::string cols, placeholders;
+
   for (const auto &[k, v] : pgn_mapping) {
     if (!cols.empty()) {
       cols += ", ";
@@ -97,7 +102,6 @@ std::string buildSpnInsertSql() {
     }
   }
 
-  // value_encoding is derived from Resolution format, not from a mapped CSV column.
   cols += ", value_encoding";
   placeholders += ", ?";
   return fmt::format("INSERT OR REPLACE INTO spns ({}) VALUES ({})", cols, placeholders);
@@ -127,7 +131,7 @@ void insertJ1939Row(sqlite::database &db, const std::string &pgn_insert_sql, con
     bool parts_inserted_flag = false;
     double min = 0.0, max = 0.0;
     size_t size_bits = 0u;
-    parsers::resolution_s::type_e encoding = parsers::resolution_s::type_e::numeric;
+    parsers::resolution_s resolution{};
   } calc;
 
   // Pre-compute size_bits
@@ -165,9 +169,14 @@ void insertJ1939Row(sqlite::database &db, const std::string &pgn_insert_sql, con
           calc.size_bits = size.has_value() ? size.value().size_bits : 0u;
           ps << calc.size_bits;
         } else if (std::get<1u>(v) == "resolution") {
-
           auto resolution = parsers::parseSpnResolution(spn_row_map[std::get<1u>(v).data()]);
-          calc.encoding = resolution.has_value() ? resolution.value().type : parsers::resolution_s::type_e::numeric;
+
+          if (resolution.has_value()) {
+            calc.resolution = resolution.value();
+          } else {
+            calc.resolution = parsers::resolution_s{};
+          }
+
           double calculated = (calc.max - calc.min) / (std::pow(2.0, calc.size_bits) - 1.0);
 
           if (std::fabs(calculated - 1.0) < 1e-9) {
@@ -175,12 +184,15 @@ void insertJ1939Row(sqlite::database &db, const std::string &pgn_insert_sql, con
           } else {
             ps << (resolution.has_value() ? resolution.value().resolution : 1.0);
           }
+        } else if (std::get<1u>(v) == "in_repeat_group") {
+          const auto &val = spn_row_map[std::get<1u>(v).data()];
+          ps << ((val == "Yes" || val == "yes" || val == "1") ? 1 : 0);
         } else {
           ps << spn_row_map[std::get<1u>(v).data()];
         }
       }
 
-      ps << parsers::resolutionTypeName(calc.encoding);
+      ps << parsers::resolutionEncodingTag(calc.resolution);
       ps.execute();
 
       // Insert SPN fragments
